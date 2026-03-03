@@ -37,6 +37,14 @@ from .types import (
 from .adapter import BaseAdapter, TokenBucketLimiter
 from .formatter import format_for_channel, split_on_boundaries
 from .router import InboundRouter
+from .deployer import (
+    GuildDeployer,
+    DeploymentResult,
+    generate_invite_link,
+    validate_bot_id,
+    validate_bot_token,
+    INTENT_INSTRUCTIONS,
+)
 
 __all__ = [
     # Types
@@ -66,4 +74,11 @@ __all__ = [
     "split_on_boundaries",
     # Router
     "InboundRouter",
+    # Deployer
+    "GuildDeployer",
+    "DeploymentResult",
+    "generate_invite_link",
+    "validate_bot_id",
+    "validate_bot_token",
+    "INTENT_INSTRUCTIONS",
 ]

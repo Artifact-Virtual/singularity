@@ -120,6 +120,12 @@ def main():
     immune_sub.add_parser("audit", help="Run Auditor examination")
     p_immune_all = immune_sub.add_parser("audit-all", help="Audit all active POAs and feed into immune")
 
+    # ── deploy ──
+    p_deploy = sub.add_parser("deploy", help="Deploy Singularity to a Discord server")
+    p_deploy.add_argument("--guild", "-g", help="Guild (server) ID to deploy to")
+    p_deploy.add_argument("--bot-id", help="Bot application/client ID")
+    p_deploy.add_argument("--invite-only", action="store_true", help="Just generate invite link")
+
     args = parser.parse_args()
 
     try:
@@ -143,6 +149,8 @@ def main():
             cmd_test(args)
         elif args.command == "immune":
             cmd_immune(args)
+        elif args.command == "deploy":
+            cmd_deploy(args)
     except KeyboardInterrupt:
         print("\nAborted.")
         sys.exit(1)
@@ -871,6 +879,82 @@ def cmd_immune(args):
 
         # Phase 3: Show refined output
         print(result.render())
+
+
+def cmd_deploy(args):
+    """Deploy Singularity infrastructure to a Discord server."""
+    from .formatters import header, success, error, warn, info, kv, dim
+
+    header("SINGULARITY [AE] — Discord Deployment")
+
+    from singularity.nerve.deployer import (
+        generate_invite_link,
+        validate_bot_id,
+        validate_bot_token,
+        GuildDeployer,
+        INTENT_INSTRUCTIONS,
+    )
+
+    # Get bot ID
+    bot_id = args.bot_id
+    if not bot_id:
+        # Try to load from config
+        sg_dir = Path.cwd() / ".singularity"
+        config_paths = [
+            Path.cwd() / "config" / "singularity.yaml",
+            sg_dir / "workspace.json",
+        ]
+        for cp in config_paths:
+            if cp.exists():
+                try:
+                    data = json.loads(cp.read_text()) if cp.suffix == ".json" else {}
+                    bot_id = data.get("discord", {}).get("bot_id", "")
+                    if bot_id:
+                        break
+                except Exception:
+                    pass
+
+        # Try .env
+        if not bot_id:
+            env_file = Path.cwd() / ".env"
+            if env_file.exists():
+                for line in env_file.read_text().splitlines():
+                    if line.startswith("DISCORD_BOT_ID=") or line.startswith("DISCORD_CLIENT_ID="):
+                        bot_id = line.split("=", 1)[1].strip().strip("\"'")
+                        break
+
+    if not bot_id:
+        print(error("No bot ID found. Use --bot-id or set DISCORD_BOT_ID in .env"))
+        sys.exit(1)
+
+    err = validate_bot_id(bot_id)
+    if err:
+        print(error(f"Invalid bot ID: {err}"))
+        sys.exit(1)
+
+    # Generate invite link
+    invite_url = generate_invite_link(bot_id)
+    print()
+    print(kv("Bot ID", bot_id))
+    print(kv("Invite URL", invite_url))
+    print()
+
+    if args.invite_only:
+        print(info("Copy the invite URL above, open in browser, select your server."))
+        print(info("Singularity will auto-deploy when the bot joins."))
+        print()
+        print(INTENT_INSTRUCTIONS)
+        return
+
+    if not args.guild:
+        print(error("Specify --guild <server_id> to deploy, or use --invite-only to get the link."))
+        sys.exit(1)
+
+    print(info(f"Deployment to guild {args.guild} requires a running Discord connection."))
+    print(info("Use 'singularity init' to configure and connect, or add the bot via invite link."))
+    print(info("Auto-deployment triggers automatically when the bot joins a new server."))
+    print()
+    print(success("Invite link generated. Bot will auto-deploy on guild join."))
 
 
 def cmd_changeset(args):

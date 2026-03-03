@@ -362,9 +362,33 @@ class InitWizard:
 
         # Discord
         setup_discord = _confirm("Configure Discord?", default=True)
-        discord_config: dict[str, Any] = {"token": "", "guild_ids": [], "authorized_users": []}
+        discord_config: dict[str, Any] = {"token": "", "bot_id": "", "guild_ids": [], "authorized_users": []}
 
         if setup_discord:
+            # Import deployer utilities
+            try:
+                from singularity.nerve.deployer import (
+                    generate_invite_link,
+                    validate_bot_id,
+                    validate_bot_token,
+                    INTENT_INSTRUCTIONS,
+                )
+                has_deployer = True
+            except ImportError:
+                has_deployer = False
+
+            # ── Step 1: Bot ID ──
+            print()
+            print(f"    {info('Go to https://discord.com/developers/applications')}")
+            print(f"    {info('Create or select your bot → copy the Application ID')}")
+            print()
+            discord_config["bot_id"] = _prompt(
+                "Bot Application ID (client ID)",
+                required=True,
+                validator=validate_bot_id if has_deployer else None,
+            )
+
+            # ── Step 2: Bot Token ──
             default_token = detected.get("discord_token", "")
             hint = " (auto-detected from .env)" if default_token else ""
             token_display = f"{default_token[:8]}...{default_token[-4:]}" if len(default_token) > 12 else default_token
@@ -375,24 +399,60 @@ class InitWizard:
                 if use_detected:
                     discord_config["token"] = default_token
                 else:
-                    discord_config["token"] = _prompt("Discord bot token", secret=True, required=True)
+                    discord_config["token"] = _prompt(
+                        "Discord bot token",
+                        secret=True,
+                        required=True,
+                        validator=validate_bot_token if has_deployer else None,
+                    )
             else:
-                discord_config["token"] = _prompt("Discord bot token", secret=True)
+                discord_config["token"] = _prompt(
+                    "Discord bot token (Bot tab → Reset Token → Copy)",
+                    secret=True,
+                    required=True,
+                    validator=validate_bot_token if has_deployer else None,
+                )
 
-            if discord_config["token"]:
-                guild_id = _prompt("Primary guild (server) ID", default=detected.get("discord_channel", ""))
+            # ── Step 3: Intents ──
+            if has_deployer and discord_config["token"]:
+                print()
+                print(INTENT_INSTRUCTIONS)
+                _confirm("I have enabled all 3 privileged intents", default=True)
+
+            # ── Step 4: Generate invite link ──
+            if has_deployer and discord_config["bot_id"]:
+                invite_url = generate_invite_link(discord_config["bot_id"])
+                print()
+                print(f"  ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓")
+                print(f"  ┃  Invite Link — Click to add bot to your server   ┃")
+                print(f"  ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛")
+                print()
+                print(f"    {invite_url}")
+                print()
+                print(f"    {info('Open this link, select your server, and authorize.')}")
+                print(f"    {info('Singularity will auto-deploy channels when the bot joins.')}")
+                print()
+                discord_config["invite_url"] = invite_url
+
+                guild_id = _prompt(
+                    "Guild (server) ID (right-click server → Copy Server ID)",
+                    default=detected.get("discord_channel", ""),
+                )
                 if guild_id:
                     discord_config["guild_ids"] = [guild_id]
 
-                owner_id = _prompt("Your Discord user ID (for owner privileges)")
-                if owner_id:
-                    discord_config["authorized_users"] = [owner_id]
+            owner_id = _prompt("Your Discord user ID (for owner privileges)")
+            if owner_id:
+                discord_config["authorized_users"] = [owner_id]
 
-                discord_config["require_mention"] = _confirm("Require @mention in channels?", default=True)
-                discord_config["dm_policy"] = "allowlist" if _confirm("Restrict DMs to allowlist?", default=True) else "open"
+            discord_config["require_mention"] = _confirm("Require @mention in channels?", default=True)
+            discord_config["dm_policy"] = "allowlist" if _confirm("Restrict DMs to allowlist?", default=True) else "open"
 
-                if discord_config["dm_policy"] == "allowlist" and owner_id:
-                    discord_config["dm_allowlist"] = [owner_id]
+            if discord_config["dm_policy"] == "allowlist" and owner_id:
+                discord_config["dm_allowlist"] = [owner_id]
+
+            # Auto-deploy is always on
+            discord_config["auto_deploy"] = True
 
         self.config["discord"] = discord_config
 

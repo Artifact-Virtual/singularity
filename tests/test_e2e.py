@@ -983,6 +983,85 @@ async def test_reflector_render():
 
 
 # ══════════════════════════════════════════════════════════════
+# DEPLOYER TESTS
+# ══════════════════════════════════════════════════════════════
+
+async def test_deployer_invite_link():
+    """Test invite link generation with correct permissions."""
+    from singularity.nerve.deployer import generate_invite_link, validate_bot_id, validate_bot_token
+
+    # Valid bot ID
+    link = generate_invite_link("123456789012345678")
+    assert "discord.com/oauth2/authorize" in link
+    assert "client_id=123456789012345678" in link
+    assert "permissions=" in link
+    assert "scope=bot" in link
+
+    # Bot ID validation
+    assert validate_bot_id("") is not None            # empty
+    assert validate_bot_id("abc") is not None         # non-numeric
+    assert validate_bot_id("123") is not None         # too short
+    assert validate_bot_id("12345678901234567") is None  # valid (17 digits)
+    assert validate_bot_id("12345678901234567890") is None  # valid (20 digits)
+
+    # Token validation
+    assert validate_bot_token("") is not None         # empty
+    assert validate_bot_token("invalid") is not None  # no dots
+    assert validate_bot_token("a.b.c") is None        # valid format
+
+
+async def test_deployer_result_persistence():
+    """Test DeploymentResult save/load."""
+    from singularity.nerve.deployer import DeploymentResult
+
+    result = DeploymentResult(
+        guild_id="123456",
+        guild_name="Test Guild",
+        success=True,
+        category_id="789",
+        channels={"bridge": "111", "cto": "222", "coo": "333"},
+    )
+
+    tmp = Path(tempfile.mkdtemp())
+    result_path = tmp / "deployment.json"
+    result.save(result_path)
+
+    loaded = DeploymentResult.load(result_path)
+    assert loaded.guild_id == "123456"
+    assert loaded.guild_name == "Test Guild"
+    assert loaded.success is True
+    assert loaded.channels["bridge"] == "111"
+    assert loaded.channels["cto"] == "222"
+    assert len(loaded.channels) == 3
+
+    # Cleanup
+    import shutil
+    shutil.rmtree(tmp)
+
+
+async def test_deployer_blueprint():
+    """Test GuildDeployer initialization and exec role configuration."""
+    from singularity.nerve.deployer import GuildDeployer, OPS_CHANNELS
+
+    exec_roles = [
+        ("cto", "🔧", "Chief Technology Officer", "Engineering"),
+        ("coo", "📋", "Chief Operating Officer", "Operations"),
+        ("cfo", "💰", "Chief Financial Officer", "Finance"),
+        ("ciso", "🛡️", "Chief Information Security Officer", "Security"),
+    ]
+
+    deployer = GuildDeployer(exec_roles=exec_roles, private=True)
+
+    assert len(deployer.exec_roles) == 4
+    assert deployer.private is True
+    assert len(OPS_CHANNELS) == 2  # bridge + dispatch
+
+    # Total channels: 2 ops + 4 exec = 6
+    expected_channels = len(OPS_CHANNELS) + len(exec_roles)
+    assert expected_channels == 6
+
+
+# ══════════════════════════════════════════════════════════════
 # AUDITOR TESTS
 # ══════════════════════════════════════════════════════════════
 
@@ -1186,6 +1265,11 @@ async def main():
         ("immune.reflector_classify", test_reflector_classification),
         ("immune.reflector_blip", test_reflector_dormant_blip),
         ("immune.reflector_render", test_reflector_render),
+        
+        # Deployer
+        ("nerve.deployer_invite", test_deployer_invite_link),
+        ("nerve.deployer_persist", test_deployer_result_persistence),
+        ("nerve.deployer_blueprint", test_deployer_blueprint),
         
         # Auditor
         ("auditor.scanner", test_auditor_scanner),

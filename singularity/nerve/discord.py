@@ -27,6 +27,7 @@ except ImportError:
 
 from .adapter import BaseAdapter
 from .formatter import format_for_channel
+from .deployer import GuildDeployer, generate_invite_link
 from .types import (
     AdapterState,
     ChannelCapabilities,
@@ -90,6 +91,8 @@ class DiscordAdapter(BaseAdapter):
         self._bot_id = ""
         self._sibling_bot_ids: set[str] = set()
         self._ready_event = asyncio.Event()
+        self._deployer: Optional[GuildDeployer] = None
+        self._auto_deploy: bool = True
 
     @property
     def channel_type(self) -> str:
@@ -121,6 +124,11 @@ class DiscordAdapter(BaseAdapter):
 
         if config.get("sibling_bot_ids"):
             self._sibling_bot_ids = set(config["sibling_bot_ids"])
+
+        # Auto-deploy config
+        self._auto_deploy = config.get("auto_deploy", True)
+        if config.get("deployer"):
+            self._deployer = config["deployer"]
 
         # Build intents
         intents = Intents.default()
@@ -199,6 +207,32 @@ class DiscordAdapter(BaseAdapter):
         async def on_resumed():
             logger.info("[%s] Resumed", self._id)
             self._health.transition(AdapterState.CONNECTED)
+
+        @client.event
+        async def on_guild_join(guild):
+            logger.info(
+                "[%s] Joined guild: %s (%s)",
+                self._id, guild.name, guild.id,
+            )
+            if self._auto_deploy and self._deployer:
+                logger.info("[%s] Auto-deploying to %s...", self._id, guild.name)
+                try:
+                    result = await self._deployer.deploy(guild)
+                    if result.success:
+                        logger.info(
+                            "[%s] Deployed %d channels to %s",
+                            self._id, len(result.channels), guild.name,
+                        )
+                    else:
+                        logger.error(
+                            "[%s] Deploy failed in %s: %s",
+                            self._id, guild.name, result.errors,
+                        )
+                except Exception as exc:
+                    logger.error(
+                        "[%s] Deploy exception in %s: %s",
+                        self._id, guild.name, exc, exc_info=True,
+                    )
 
     async def platform_disconnect(self) -> None:
         if self._client:
@@ -497,3 +531,28 @@ class DiscordAdapter(BaseAdapter):
     def get_guild_count(self) -> int:
         """How many guilds we're in."""
         return len(self._client.guilds) if self._client else 0
+
+    def set_deployer(self, deployer: GuildDeployer) -> None:
+        """Set the guild deployer for auto-deployment on join."""
+        self._deployer = deployer
+
+    def get_invite_link(self) -> str:
+        """Generate the bot invite link with required permissions."""
+        if not self._bot_id:
+            raise RuntimeError("Bot ID not available — connect first or provide bot_id in config")
+        return generate_invite_link(self._bot_id)
+
+    async def deploy_to_guild(self, guild_id: int) -> Optional[Any]:
+        """
+        Manually trigger deployment to a guild the bot is already in.
+        Useful for deploying to existing guilds after setup.
+        """
+        if not self._client or not self._deployer:
+            return None
+        guild = self._client.get_guild(guild_id)
+        if not guild:
+            try:
+                guild = await self._client.fetch_guild(guild_id)
+            except Exception:
+                return None
+        return await self._deployer.deploy(guild)
