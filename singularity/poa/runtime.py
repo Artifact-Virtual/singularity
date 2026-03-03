@@ -212,7 +212,28 @@ class POARuntime:
                     message=f"HTTP {status} in {elapsed:.0f}ms",
                     value=status, duration_ms=elapsed,
                 )
-        except (URLError, HTTPError, OSError) as e:
+        except HTTPError as e:
+            elapsed = (time.monotonic() - start) * 1000
+            # HTTPError has a status code — check if it matches expected
+            if e.code == ep.expected_status:
+                severity = "info"
+                if elapsed > config.latency_crit_ms:
+                    severity = "critical"
+                elif elapsed > config.latency_warn_ms:
+                    severity = "warn"
+                return CheckResult(
+                    name=f"endpoint:{ep.name or ep.url}",
+                    passed=True, severity=severity,
+                    message=f"HTTP {e.code} in {elapsed:.0f}ms (expected)",
+                    value=e.code, duration_ms=elapsed,
+                )
+            return CheckResult(
+                name=f"endpoint:{ep.name or ep.url}",
+                passed=False, severity="critical",
+                message=f"HTTP {e.code} (expected {ep.expected_status})",
+                value=e.code, duration_ms=elapsed,
+            )
+        except (URLError, OSError) as e:
             elapsed = (time.monotonic() - start) * 1000
             return CheckResult(
                 name=f"endpoint:{ep.name or ep.url}",
@@ -254,10 +275,23 @@ class POARuntime:
 
     @staticmethod
     def _check_service(service_name: str) -> CheckResult:
-        """Check if a systemd service is active."""
+        """Check if a systemd service is active (tries system, then user)."""
         try:
+            # Try system service first
             result = subprocess.run(
                 ["systemctl", "is-active", service_name],
+                capture_output=True, text=True, timeout=5,
+            )
+            if result.stdout.strip() == "active":
+                return CheckResult(
+                    name=f"service:{service_name}",
+                    passed=True, severity="info",
+                    message="active (system)",
+                )
+            
+            # Try user service
+            result = subprocess.run(
+                ["systemctl", "--user", "is-active", service_name],
                 capture_output=True, text=True, timeout=5,
             )
             active = result.stdout.strip() == "active"
@@ -265,7 +299,7 @@ class POARuntime:
                 name=f"service:{service_name}",
                 passed=active,
                 severity="info" if active else "critical",
-                message=result.stdout.strip(),
+                message=f"{result.stdout.strip()} ({'user' if active else 'not found'})",
             )
         except Exception as e:
             return CheckResult(
