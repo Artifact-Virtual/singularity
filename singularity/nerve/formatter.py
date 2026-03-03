@@ -62,8 +62,9 @@ def _format_discord(markdown: str) -> str:
     """Discord supports standard markdown. Just strip HTML and fix tables."""
     result = markdown
 
-    # Strip HTML tags
-    result = re.sub(r"<[^>]+>", "", result)
+    # Strip HTML tags but preserve Discord syntax: mentions (<@id>, <@!id>, <#id>, <@&id>),
+    # custom emoji (<:name:id>, <a:name:id>), and timestamps (<t:unix:format>)
+    result = re.sub(r"<(?![@#:!]|a:)[^>]+>", "", result)
 
     # Convert markdown tables to code blocks (Discord doesn't render tables)
     result = re.sub(
@@ -88,8 +89,8 @@ def _format_whatsapp(markdown: str) -> str:
     # Strikethrough ~~text~~ → ~text~
     result = re.sub(r"~~(.+?)~~", r"~\1~", result)
 
-    # Strip HTML
-    result = re.sub(r"<[^>]+>", "", result)
+    # Strip HTML (preserve Discord-style mentions/emoji in case of cross-platform)
+    result = re.sub(r"<(?![@#:!]|a:)[^>]+>", "", result)
 
     # Links [text](url) → text: url
     result = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r"\1: \2", result)
@@ -132,7 +133,7 @@ def _format_plain(markdown: str) -> str:
     result = re.sub(r"`([^`]+)`", r"\1", result)
     result = re.sub(r"```[\s\S]*?```", lambda m: m.group(0).replace("```", "").strip(), result)
     result = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r"\1 (\2)", result)
-    result = re.sub(r"<[^>]+>", "", result)
+    result = re.sub(r"<(?![@#:!]|a:)[^>]+>", "", result)
     return result.strip()
 
 

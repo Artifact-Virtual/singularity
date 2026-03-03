@@ -370,7 +370,7 @@ class EventBus:
                 latency = time.perf_counter() - t0
                 self._metrics.record_delivery(latency)
                 
-                if latency > 1.0:
+                if latency > 5.0:
                     logger.warning("Slow handler: %s took %.2fs for %s",
                                    sub.source, latency, event.name)
                 

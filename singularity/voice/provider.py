@@ -161,8 +161,15 @@ class ChatProvider(ABC):
         self._consecutive_failures = 0
         self._last_success = time.time()
         
+        final_content = "".join(content_parts)
+        logger.info(
+            f"chat() result: content={len(final_content)} chars, "
+            f"tool_calls={len(tool_calls)}, finish={finish_reason}, "
+            f"usage={usage}"
+        )
+        
         return ChatResponse(
-            content="".join(content_parts),
+            content=final_content,
             tool_calls=tool_calls,
             finish_reason=finish_reason,
             usage=usage,

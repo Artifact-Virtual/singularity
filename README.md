@@ -412,15 +412,15 @@ Each was built from first principles. No wrappers. No abstractions over abstract
 ```
  Language      Files    Lines
 ─────────────────────────────
- Python          48    14,200+
- YAML             4       350+
- Markdown         8     3,200+
- Shell            5       400+
+ Python          60+   22,000+
+ YAML             5       450+
+ Markdown        40+   5,900+
+ Shell            5       240+
 ─────────────────────────────
- Total           65    18,000+
+ Total          110+   28,500+
 ```
 
-Written in 19 days. Battle-tested in production across live products, real customers, and one active conflict zone.
+Written in 20 days. Battle-tested in production across live products, real customers, and one active conflict zone.
 
 ---
 

@@ -252,11 +252,17 @@ class DiscordAdapter(BaseAdapter):
             return
         # Ignore other bots — but never siblings
         if msg.author.bot and str(msg.author.id) not in self._sibling_bot_ids:
+            logger.debug("Ignoring non-sibling bot: %s (%s)", msg.author.name, msg.author.id)
             return
 
-        source = self._build_source(msg)
-        payload = self._build_payload(msg)
-        self.emit(source, payload, str(msg.id))
+        logger.info("Message from %s (%s) in %s: %s", msg.author.name, msg.author.id, msg.channel.id, msg.content[:100])
+        try:
+            source = self._build_source(msg)
+            payload = self._build_payload(msg)
+            self.emit(source, payload, str(msg.id))
+            logger.info("Emitted message %s to router", msg.id)
+        except Exception as e:
+            logger.error("Failed to process message %s: %s", msg.id, e, exc_info=True)
 
     async def _handle_reaction(self, payload, remove: bool) -> None:
         if str(payload.user_id) == self._bot_id:

@@ -159,19 +159,32 @@ class InboundRouter:
         
         This is sync-safe — emits are scheduled on the running event loop.
         """
+        logger.info(
+            "route() called: sender=%s chat=%s type=%s mentions=%s mid=%s",
+            source.sender_id, source.chat_id, source.chat_type,
+            source.mentions, platform_message_id,
+        )
         # 1. Deduplication
         dedup_key = platform_message_id or f"{source.adapter_id}:{source.chat_id}:{time.time()}"
         if self._dedup.check(dedup_key):
+            logger.info("Dedup rejected: %s from %s", dedup_key, source.sender_id)
             return False
 
         # 2. Policy check
         policy = self._get_policy(source.channel_type)
         if not self._check_policy(policy, source):
+            logger.info("Policy rejected: %s in %s (policy=%s)", source.sender_id, source.chat_id, source.channel_type)
             self._schedule_emit("nerve.rejected", {
                 "reason": "policy",
                 "sender": source.sender_id,
                 "chat": source.chat_id,
             })
+            return False
+
+        # 2a. @end — universal conversation terminator. Any message containing @end
+        # signals "do not respond." Both bots honor this. No LLM turn, no reaction.
+        if payload.text and re.search(r'@end\b', payload.text, re.IGNORECASE):
+            logger.info("@end terminator: %s in %s — not responding", source.sender_id, source.chat_id)
             return False
 
         # 3. Sibling cooldown
@@ -204,7 +217,7 @@ class InboundRouter:
         event_name = "nerve.interrupt" if priority == MessagePriority.INTERRUPT else "nerve.routed"
         self._schedule_emit(event_name, {"envelope": envelope})
 
-        logger.debug(
+        logger.info(
             "Routed %s from %s → session %s [%s]",
             payload.type.value, source.sender_id, session_id, priority.value,
         )

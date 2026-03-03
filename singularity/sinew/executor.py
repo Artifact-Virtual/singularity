@@ -51,6 +51,16 @@ class ToolExecutor:
         self.exec_timeout = exec_timeout
         self.max_output = max_output
         self._background_procs: dict[str, asyncio.subprocess.Process] = {}
+        self._discord_adapter: Any = None  # Set by runtime after boot
+        self._current_sender_id: str | None = None  # For @mention enforcement
+    
+    def set_discord_adapter(self, adapter: Any) -> None:
+        """Wire the Discord adapter for discord_send/react tools."""
+        self._discord_adapter = adapter
+    
+    def set_current_sender(self, sender_id: str | None) -> None:
+        """Set the current message sender for @mention enforcement."""
+        self._current_sender_id = sender_id
     
     async def execute(self, tool_name: str, arguments: dict[str, Any]) -> str:
         """Execute a tool by name. Returns the result as a string."""
@@ -176,13 +186,17 @@ class ToolExecutor:
         if not path:
             return "Error: no path provided"
         
+        # Resolve relative paths against workspace (not cwd)
+        p = Path(path)
+        if not p.is_absolute():
+            p = self.workspace / p
+        
         from .sandbox import validate_path
-        violation = validate_path(path)
+        violation = validate_path(str(p))
         if violation:
             return f"Blocked: {violation}"
         
         try:
-            p = Path(path)
             if not p.exists():
                 return f"File not found: {path}"
             if not p.is_file():
@@ -209,13 +223,17 @@ class ToolExecutor:
         if not path:
             return "Error: no path provided"
         
+        # Resolve relative paths against workspace
+        p = Path(path)
+        if not p.is_absolute():
+            p = self.workspace / p
+        
         from .sandbox import validate_path
-        violation = validate_path(path)
+        violation = validate_path(str(p))
         if violation:
             return f"Blocked: {violation}"
         
         try:
-            p = Path(path)
             p.parent.mkdir(parents=True, exist_ok=True)
             p.write_text(content, encoding="utf-8")
             return f"Wrote {len(content)} bytes to {path}"
@@ -231,13 +249,17 @@ class ToolExecutor:
         if not path or not old_text:
             return "Error: path and oldText required"
         
+        # Resolve relative paths against workspace
+        p = Path(path)
+        if not p.is_absolute():
+            p = self.workspace / p
+        
         from .sandbox import validate_path
-        violation = validate_path(path)
+        violation = validate_path(str(p))
         if violation:
             return f"Blocked: {violation}"
         
         try:
-            p = Path(path)
             if not p.exists():
                 return f"File not found: {path}"
             
@@ -290,3 +312,145 @@ class ToolExecutor:
                     
         except Exception as e:
             return f"Fetch error: {e}"
+    
+    # ── Discord tools ────────────────────────────────────────────
+    
+    async def _tool_discord_send(self, args: dict) -> str:
+        """Send a message to a Discord channel."""
+        channel_id = args.get("channel_id", "")
+        content = args.get("content", "")
+        
+        if not channel_id or not content:
+            return "Error: channel_id and content required"
+        
+        # Enforce @mention — if sender is known and not already mentioned, prepend
+        if self._current_sender_id and f"<@{self._current_sender_id}>" not in content and f"<@!{self._current_sender_id}>" not in content:
+            # Only auto-prepend if no OTHER @mention is present (LLM may be addressing someone specific)
+            import re
+            if not re.search(r'<@!?\d+>', content):
+                content = f"<@{self._current_sender_id}> {content}"
+        
+        # Use the adapter reference if wired
+        if self._discord_adapter:
+            from ..nerve.types import OutboundMessage
+            try:
+                result = await self._discord_adapter.send(
+                    channel_id, OutboundMessage(content=content)
+                )
+                if result.success:
+                    return f"Sent to {channel_id} (msg_id: {result.message_id})"
+                return f"Send failed: {result.error}"
+            except Exception as e:
+                return f"Discord send error: {e}"
+        
+        return "Error: Discord adapter not available"
+    
+    async def _tool_discord_react(self, args: dict) -> str:
+        """React to a Discord message with an emoji."""
+        channel_id = args.get("channel_id", "")
+        message_id = args.get("message_id", "")
+        emoji = args.get("emoji", "")
+        
+        if not channel_id or not message_id or not emoji:
+            return "Error: channel_id, message_id, and emoji required"
+        
+        if self._discord_adapter:
+            try:
+                await self._discord_adapter.react(channel_id, message_id, emoji)
+                return f"Reacted with {emoji} on {message_id}"
+            except Exception as e:
+                return f"Discord react error: {e}"
+        
+        return "Error: Discord adapter not available"
+    
+    # ── COMB tools ───────────────────────────────────────────────
+    
+    async def _tool_comb_stage(self, args: dict) -> str:
+        """Stage information in COMB for persistence."""
+        content = args.get("content", "")
+        if not content:
+            return "Error: content required"
+        
+        try:
+            # Primary: use the enterprise flush.py (battle-tested)
+            flush_script = self.workspace / ".ava-memory" / "flush.py"
+            if flush_script.exists():
+                proc = await asyncio.create_subprocess_exec(
+                    "python3", str(flush_script), "stage", content,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.STDOUT,
+                    cwd=str(self.workspace),
+                )
+                stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=15)
+                output = stdout.decode("utf-8", errors="replace").strip()
+                return output or f"Staged {len(content)} chars"
+            
+            # Fallback: native CombMemory
+            from ..memory.comb import CombMemory
+            comb_path = self.workspace / ".singularity" / "comb"
+            comb = CombMemory(store_path=str(comb_path))
+            await comb.initialize()
+            success = await comb.stage(content)
+            return f"Staged {len(content)} chars to COMB" if success else "COMB stage failed"
+        except Exception as e:
+            return f"COMB stage error: {e}"
+    
+    async def _tool_comb_recall(self, args: dict) -> str:
+        """Recall operational memory from COMB."""
+        try:
+            # Primary: use the enterprise flush.py (battle-tested)
+            flush_script = self.workspace / ".ava-memory" / "flush.py"
+            if flush_script.exists():
+                proc = await asyncio.create_subprocess_exec(
+                    "python3", str(flush_script), "recall",
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.STDOUT,
+                    cwd=str(self.workspace),
+                    env={**os.environ, "PATH": os.environ.get("PATH", "")},
+                )
+                stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=15)
+                output = stdout.decode("utf-8", errors="replace").strip()
+                return output or "(no COMB data)"
+            
+            # Fallback: native CombMemory
+            from ..memory.comb import CombMemory
+            comb_path = self.workspace / ".singularity" / "comb"
+            comb = CombMemory(store_path=str(comb_path))
+            await comb.initialize()
+            result = await comb.recall()
+            return result or "(no COMB data)"
+        except Exception as e:
+            return f"COMB recall error: {e}"
+    
+    # ── Memory search ────────────────────────────────────────────
+    
+    async def _tool_memory_search(self, args: dict) -> str:
+        """Search enterprise memory using HEKTOR."""
+        query = args.get("query", "")
+        k = args.get("k", 5)
+        mode = args.get("mode", "hybrid")
+        
+        if not query:
+            return "Error: query required"
+        
+        try:
+            search_script = self.workspace / ".ava-memory" / "ava_memory_fast.py"
+            if not search_script.exists():
+                return "Error: HEKTOR memory system not found"
+            
+            cmd = [
+                "python3", str(search_script), "search", query,
+                "--mode", mode, "-k", str(int(k))
+            ]
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+                cwd=str(self.workspace),
+                env={**os.environ, "PATH": os.environ.get("PATH", "")},
+            )
+            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=30)
+            output = stdout.decode("utf-8", errors="replace").strip()
+            return output or "(no results)"
+        except Exception as e:
+            return f"Memory search error: {e}"

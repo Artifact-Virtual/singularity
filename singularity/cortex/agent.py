@@ -298,9 +298,13 @@ class AgentLoop:
         args_raw = fn.get("arguments", "{}")
         try:
             if isinstance(args_raw, str):
+                # Handle empty/whitespace arguments (e.g. comb_recall with no params)
+                args_raw = args_raw.strip() if args_raw else "{}"
+                if not args_raw:
+                    args_raw = "{}"
                 arguments = json.loads(args_raw)
             else:
-                arguments = args_raw
+                arguments = args_raw if args_raw is not None else {}
         except json.JSONDecodeError:
             return f"Error: invalid JSON arguments: {args_raw[:200]}"
         
@@ -312,10 +316,16 @@ class AgentLoop:
                 "iteration": self._iteration,
             }, source="cortex")
         
+        # Log tool call with args summary
+        args_summary = str(arguments)[:120]
+        logger.info(
+            f"[{self._turn_id}] Tool call: {name}({args_summary})"
+        )
+        
         # Execute via SINEW
         result = await self.tools.execute(name, arguments)
         
-        logger.debug(
+        logger.info(
             f"[{self._turn_id}] Tool {name}: "
             f"{len(result)} chars output"
         )

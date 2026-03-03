@@ -122,49 +122,50 @@ One signal. Cascading effects. Managed chaos. Like power through a circuit — e
 
 Ali's law: **Linear progression, branching dependency trees. Each branch must resolve before the trunk advances.**
 
-### Phase 0 — Foundation (current)
+### Phase 0 — Foundation ✅
 - [x] Vision document (this file)
-- [ ] Dependency map (what needs what)
-- [ ] Technology decisions (Python? TypeScript? Both?)
-- [ ] Directory structure
+- [x] Dependency map (what needs what)
+- [x] Technology decisions (Python)
+- [x] Directory structure
 
-### Phase 1 — Skeleton
-- [ ] Event bus (the spine of everything)
-- [ ] SPINE config loader
-- [ ] MARROW memory (COMB native integration)
-- [ ] SINEW tools (basic: exec, read, write)
+### Phase 1 — Skeleton ✅
+- [x] Event bus (the spine of everything)
+- [x] SPINE config loader
+- [x] MARROW memory (COMB native integration)
+- [x] SINEW tools (exec, read, write, edit, web_fetch, discord_send/react, comb_stage/recall, memory_search)
 
-### Phase 2 — Brain
-- [ ] VOICE LLM provider chain
-- [ ] CORTEX agent loop (single-turn first)
-- [ ] CORTEX multi-turn with tools
-- [ ] PULSE iteration budget
+### Phase 2 — Brain ✅
+- [x] VOICE LLM provider chain (Copilot proxy + Ollama fallback)
+- [x] CORTEX agent loop (single-turn first)
+- [x] CORTEX multi-turn with tools
+- [x] PULSE iteration budget (auto-expand at threshold)
+- [x] BLINK seamless continuation (max_depth=5, invisible to user)
 
-### Phase 3 — Nerves
-- [ ] NERVE Discord adapter
-- [ ] NERVE message format (unified)
-- [ ] Channel routing
-- [ ] Persona system
+### Phase 3 — Nerves ✅
+- [x] NERVE Discord adapter (gateway v10, discord.py 2.7.1)
+- [x] NERVE message format (unified BusEnvelope)
+- [x] Channel routing (InboundRouter with policies)
+- [x] Persona system (config-driven, channel → persona mapping)
 
-### Phase 4 — Immune System
-- [ ] IMMUNE health checks per subsystem
-- [ ] Self-healing (process restart)
-- [ ] Failover (cloud → local)
-- [ ] Alerting (Discord/WhatsApp)
-- [ ] POA integration
+### Phase 4 — Immune System ✅
+- [x] IMMUNE health checks per subsystem
+- [x] Self-healing (process restart via systemd + watchdog)
+- [x] Failover (cloud → local via provider chain)
+- [x] Alerting (Discord channel alerts)
+- [x] POA integration (audit/monitoring runtime)
 
-### Phase 5 — C-Suite
-- [ ] Native exec spawning
-- [ ] CEO router
-- [ ] Isolated exec contexts
-- [ ] Report aggregation
+### Phase 5 — C-Suite ✅
+- [x] Native exec spawning (coordinator + executive lifecycle)
+- [x] CEO router (dispatch + routing)
+- [x] Isolated exec contexts (per-role tool scoping)
+- [x] Report aggregation (structured reporting)
 
-### Phase 6 — Goes Live
-- [ ] Full personality integration
-- [ ] Memory continuity (wake up knowing)
-- [ ] Multi-agent coordination (sister runtimes, external agents)
-- [ ] Battle test
-- [ ] Production deployment
+### Phase 6 — Goes Live 🚀
+- [x] Full personality integration (Aria identity + COMB recall)
+- [x] Memory continuity (wake up knowing via COMB + session store)
+- [ ] Multi-agent coordination (sister runtimes — AVA ↔ Singularity)
+- [x] Battle test (live production across real traffic)
+- [x] Production deployment (systemd service, auto-restart)
 
 ---
 

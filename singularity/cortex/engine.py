@@ -85,6 +85,7 @@ class CortexEngine:
         config: CortexConfig,
         bus: Any = None,
         workspace: str = "",
+        comb: Any = None,
     ):
         self.voice = voice
         self.tools = tools
@@ -92,6 +93,7 @@ class CortexEngine:
         self.config = config
         self.bus = bus
         self.workspace = workspace
+        self.comb = comb
         
         self._system_prompt: str = ""
         self._prompt_loaded = False
@@ -139,6 +141,10 @@ class CortexEngine:
             bus=self.bus,
             session_id=session_id,
         )
+        
+        # Set current sender on tool executor for @mention enforcement
+        if source and hasattr(source, 'sender_id') and self.tools:
+            self.tools.set_current_sender(source.sender_id)
         
         # 3. The blink loop — may run multiple agent cycles
         final_result = None
@@ -292,12 +298,16 @@ class CortexEngine:
                 if persona_prompt else identity_content
             )
         
-        # Load COMB context
+        # Load COMB context (use shared instance if available)
         comb_context = ""
         try:
-            from ..memory.comb import COMBStore
-            comb = COMBStore(self.workspace)
-            comb_context = await comb.recall()
+            if self.comb:
+                comb_context = await self.comb.recall()
+            else:
+                from ..memory.comb import CombMemory
+                comb = CombMemory(store_path=os.path.join(self.workspace, ".singularity", "comb"))
+                await comb.initialize()
+                comb_context = await comb.recall()
             if comb_context:
                 logger.debug(f"COMB recall: {len(comb_context)} chars")
         except Exception as e:

@@ -33,7 +33,28 @@ from typing import Any
 from .bus import EventBus
 from .config import SingularityConfig, load_config
 
+import re
+
 logger = logging.getLogger("singularity.runtime")
+
+
+def _ensure_mention(text: str, sender_id: str | None, channel_type: str = "discord") -> str:
+    """Ensure the response contains an @mention of the sender (Discord only).
+    
+    If the text already has a <@sender_id> mention, return as-is.
+    Otherwise prepend <@sender_id> to the response.
+    This is a structural enforcement — the LLM can't forget it.
+    """
+    if channel_type != "discord" or not sender_id:
+        return text
+    mention = f"<@{sender_id}>"
+    # Check if already mentioned anywhere in the text
+    if mention in text:
+        return text
+    # Also accept <@!id> format (nickname mention)
+    if f"<@!{sender_id}>" in text:
+        return text
+    return f"{mention} {text}"
 
 
 class Runtime:
@@ -156,6 +177,16 @@ class Runtime:
         await self.sessions.open()
         comb_path = os.path.join(self.workspace, ".singularity", "comb")
         self.comb = CombMemory(store_path=comb_path, bus=self.bus)
+        await self.comb.initialize()
+        
+        # Recall on boot if configured
+        if self.config.memory.recall_on_boot:
+            recall_content = await self.comb.recall()
+            if recall_content:
+                logger.info(f"  COMB recall: {len(recall_content)} chars")
+            else:
+                logger.info("  COMB recall: empty (first boot or no staged content)")
+        
         logger.info(f"  MEMORY ready (workspace: {self.workspace})")
     
     async def _boot_sinew(self) -> None:
@@ -248,6 +279,7 @@ class Runtime:
             config=cortex_config,
             bus=self.bus,
             workspace=workspace,
+            comb=self.comb,
         )
         await self.cortex.boot()
         logger.info(f"  CORTEX ready (model: {vc.primary_model})")
@@ -323,7 +355,7 @@ class Runtime:
                 self.router.route(
                     envelope.source,
                     envelope.payload,
-                    envelope.id,
+                    envelope.metadata.platform_message_id if envelope.metadata else envelope.id,
                 )
             adapter.on_message(on_message)
             
@@ -335,6 +367,9 @@ class Runtime:
                     "guild_ids": dc.guild_ids,
                 })
                 self.adapters["discord"] = adapter
+                # Wire adapter to SINEW for discord_send/react tools
+                if self.tools:
+                    self.tools.set_discord_adapter(adapter)
                 logger.info("  Discord adapter connected")
             except Exception as e:
                 logger.error(f"  Discord adapter failed: {e}")
@@ -398,6 +433,15 @@ class Runtime:
             
             session_id = envelope.session_id or envelope.source.chat_id or "default"
             
+            # Send typing indicator so the user knows we're processing
+            adapter_type = envelope.source.channel_type or "discord"
+            adapter = self.adapters.get(adapter_type)
+            if adapter:
+                try:
+                    await adapter.typing(envelope.source.chat_id)
+                except Exception:
+                    pass  # typing is best-effort, don't block processing
+            
             # Process through cortex engine
             if self.cortex:
                 try:
@@ -412,18 +456,38 @@ class Runtime:
                     if result and result.response:
                         adapter_id = envelope.source.adapter_id
                         chat_id = envelope.source.chat_id
+                        sender_id = getattr(envelope.source, 'sender_id', None)
+                        channel_type = envelope.source.channel_type or "discord"
                         
-                        adapter = self.adapters.get("discord")  # TODO: route by adapter_id
+                        # Enforce @mention — structural, not prompt-dependent
+                        response_text = _ensure_mention(
+                            result.response, sender_id, channel_type
+                        )
+                        
+                        logger.info(
+                            f"Sending response to {chat_id}: "
+                            f"{len(response_text)} chars"
+                        )
+                        
+                        # Route to correct adapter by type
+                        adapter = self.adapters.get(channel_type)
                         if adapter:
                             from .nerve.types import OutboundMessage
                             from .nerve.formatter import format_for_channel
                             
                             chunks = format_for_channel(
-                                result.response,
+                                response_text,
                                 adapter.capabilities,
                             )
                             for chunk in chunks:
-                                await adapter.send(chat_id, OutboundMessage(content=chunk))
+                                send_result = await adapter.send(chat_id, OutboundMessage(content=chunk))
+                                logger.info(f"Send result: {send_result}")
+                    else:
+                        logger.warning(
+                            f"No response from cortex for session {session_id[:12]}... "
+                            f"(result={result is not None}, "
+                            f"response={repr(result.response[:100]) if result and result.response else 'empty'})"
+                        )
                 
                 except Exception as e:
                     logger.error(f"CORTEX processing error: {e}")
