@@ -14,15 +14,13 @@ No direct function calls — everything goes through events.
 from __future__ import annotations
 
 import asyncio
+import datetime
 import logging
 import time
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable, Awaitable, TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from ..bus import EventBus
 
 logger = logging.getLogger("singularity.pulse.scheduler")
 
@@ -229,7 +227,6 @@ class Scheduler:
         
         # Check active hours
         if config.active_hours:
-            import datetime
             current_hour = datetime.datetime.now().hour
             start, end = config.active_hours
             if start <= end:

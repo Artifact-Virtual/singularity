@@ -228,6 +228,7 @@ class GuildDeployer:
         private: bool = True,
         event_callback: Optional[callable] = None,
         sg_dir: Optional[Path] = None,
+        authorized_user_ids: list[str] = None,
     ):
         """
         Args:
@@ -235,11 +236,13 @@ class GuildDeployer:
             private: If True, channels are hidden from @everyone
             event_callback: async callback(event_name, data) for bus events
             sg_dir: .singularity directory for persistence
+            authorized_user_ids: Discord user IDs to grant access (in private mode)
         """
         self.exec_roles = exec_roles or []
         self.private = private
         self._event_cb = event_callback
         self._sg_dir = sg_dir
+        self.authorized_user_ids = authorized_user_ids or []
         self._deployments: dict[str, DeploymentResult] = {}
 
     async def _emit(self, event: str, data: dict) -> None:
@@ -369,6 +372,25 @@ class GuildDeployer:
                     attach_files=True,
                     embed_links=True,
                 )
+            # Authorized users get full access
+            for uid in self.authorized_user_ids:
+                try:
+                    member = guild.get_member(int(uid))
+                    if not member:
+                        member = await guild.fetch_member(int(uid))
+                    if member:
+                        overwrites[member] = PermissionOverwrite(
+                            view_channel=True,
+                            send_messages=True,
+                            manage_channels=True,
+                            manage_messages=True,
+                            read_message_history=True,
+                            attach_files=True,
+                            embed_links=True,
+                        )
+                        logger.info(f"  Authorized user {member.display_name} ({uid})")
+                except Exception as e:
+                    logger.warning(f"  Could not add authorized user {uid}: {e}")
 
         category = await guild.create_category(
             name=CATEGORY_NAME,

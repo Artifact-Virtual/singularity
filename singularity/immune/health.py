@@ -184,9 +184,11 @@ class HealthTracker:
         self.last_damage_time: float = 0.0
         self.status: HealthStatus = HealthStatus.HEALTHY
 
-        # History
+        # History (bounded — prevent memory leaks)
+        self._event_log_max = 200
         self.event_log: list[HealthEvent] = []
         self.status_effects: list[StatusEffect] = []
+        self._status_transition_max = 50
         self._status_transition_log: list[tuple[HealthStatus, HealthStatus, float]] = []
 
         # Stats
@@ -239,8 +241,8 @@ class HealthTracker:
             description=description,
         )
         self.event_log.append(event)
-
-        # Update status
+        if len(self.event_log) > self._event_log_max:
+            self.event_log = self.event_log[-self._event_log_max:]
         self._update_status()
 
         # Check death
@@ -370,6 +372,8 @@ class HealthTracker:
             auditor_id=auditor_id,
         )
         self.event_log.append(event)
+        if len(self.event_log) > self._event_log_max:
+            self.event_log = self.event_log[-self._event_log_max:]
 
         self._update_status()
 
@@ -411,6 +415,8 @@ class HealthTracker:
 
         if old_status != self.status:
             self._status_transition_log.append((old_status, self.status, time.time()))
+            if len(self._status_transition_log) > self._status_transition_max:
+                self._status_transition_log = self._status_transition_log[-self._status_transition_max:]
             logger.info(f"🔄 Status: {old_status.value} → {self.status.value}")
             self._apply_status_effects()
             self._emit_async("immune.status_change", {

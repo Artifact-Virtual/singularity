@@ -93,6 +93,7 @@ class DiscordAdapter(BaseAdapter):
         self._ready_event = asyncio.Event()
         self._deployer: Optional[GuildDeployer] = None
         self._auto_deploy: bool = True
+        self._channel_cache: dict[int, Any] = {}  # channel_id → channel object
 
     @property
     def channel_type(self) -> str:
@@ -124,6 +125,10 @@ class DiscordAdapter(BaseAdapter):
 
         if config.get("sibling_bot_ids"):
             self._sibling_bot_ids = set(config["sibling_bot_ids"])
+
+        # Boot message config — where to announce startup
+        self._boot_channels = config.get("alert_channels", [])
+        self._owner_ids = config.get("authorized_users", [])
 
         # Auto-deploy config
         self._auto_deploy = config.get("auto_deploy", True)
@@ -240,26 +245,33 @@ class DiscordAdapter(BaseAdapter):
                     )
 
     async def _send_boot_message(self) -> None:
-        """Send startup announcement to the bridge channel."""
-        BRIDGE_CHANNEL = "1477331186912329800"
-        ALI_ID = "193011943382974466"
-        try:
-            boot_msg = (
-                f"<@{ALI_ID}> ⚡ **Singularity Online.**\n\n"
-                "Brutalist mandate loaded. Cognitive rails active. "
-                "Source of truth for Artifact Virtual — operational.\n\n"
-                "No margin for BS. Ready to work."
-            )
-            result = await self.platform_send(
-                BRIDGE_CHANNEL,
-                OutboundMessage(content=boot_msg),
-            )
-            if result.success:
-                logger.info("[%s] Boot message sent to bridge", self._id)
-            else:
-                logger.warning("[%s] Boot message failed: %s", self._id, result.error)
-        except Exception as exc:
-            logger.warning("[%s] Boot message error: %s", self._id, exc)
+        """Send startup announcement to configured alert channels."""
+        if not self._boot_channels:
+            logger.info("[%s] No alert channels configured — skipping boot message", self._id)
+            return
+
+        # Mention the first authorized user (owner) if configured
+        owner_mention = f"<@{self._owner_ids[0]}> " if self._owner_ids else ""
+
+        boot_msg = (
+            f"{owner_mention}⚡ **Singularity Online.**\n\n"
+            "Brutalist mandate loaded. Cognitive rails active. "
+            "Source of truth — operational.\n\n"
+            "No margin for BS. Ready to work."
+        )
+
+        for channel_id in self._boot_channels:
+            try:
+                result = await self.platform_send(
+                    channel_id,
+                    OutboundMessage(content=boot_msg),
+                )
+                if result.success:
+                    logger.info("[%s] Boot message sent to %s", self._id, channel_id)
+                else:
+                    logger.warning("[%s] Boot message failed for %s: %s", self._id, channel_id, result.error)
+            except Exception as exc:
+                logger.warning("[%s] Boot message error for %s: %s", self._id, channel_id, exc)
 
     async def platform_disconnect(self) -> None:
         if self._client:
@@ -369,11 +381,7 @@ class DiscordAdapter(BaseAdapter):
             chat_id=str(msg.channel.id),
             chat_type=chat_type,
             sender_id=str(msg.author.id),
-            sender_name=(
-                msg.author.display_name
-                if hasattr(msg.author, "display_name")
-                else msg.author.name
-            ),
+            sender_name=getattr(msg.author, "display_name", msg.author.name),
             reply_to_id=(
                 str(msg.reference.message_id)
                 if msg.reference and msg.reference.message_id
@@ -508,16 +516,23 @@ class DiscordAdapter(BaseAdapter):
         )
 
     async def _resolve_channel(self, chat_id: str):
-        """Resolve a channel by ID."""
+        """Resolve a channel by ID, with caching."""
         if not self._client:
             return None
+        int_id = int(chat_id)
+        # Check cache first
+        cached = self._channel_cache.get(int_id)
+        if cached is not None:
+            return cached
         try:
-            channel = self._client.get_channel(int(chat_id))
+            channel = self._client.get_channel(int_id)
             if channel and hasattr(channel, "send"):
+                self._channel_cache[int_id] = channel
                 return channel
-            # Try fetching
-            channel = await self._client.fetch_channel(int(chat_id))
+            # Try fetching (API call)
+            channel = await self._client.fetch_channel(int_id)
             if channel and hasattr(channel, "send"):
+                self._channel_cache[int_id] = channel
                 return channel
         except Exception:
             pass

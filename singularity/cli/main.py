@@ -1236,44 +1236,6 @@ def cmd_changeset(args):
 # HELPERS
 # ══════════════════════════════════════════════════════════════
 
-def _run_audit(workspace: str, enterprise: str = "", industry: str = "", output_path: str = None):
-    """Run workspace audit and print results."""
-    from .formatters import info, success, warn
-    
-    audit_data = _quick_scan(workspace)
-    
-    info(f"Scanned: {workspace}")
-    info(f"Projects: {audit_data.get('project_count', 0)}")
-    info(f"Code projects: {audit_data.get('code_projects', 0)}")
-    info(f"Live products: {audit_data.get('live_products', 0)}")
-    
-    if audit_data.get("has_security_concerns"):
-        warn("Security concerns detected (exposed .env files)")
-    
-    # Save audit
-    from datetime import datetime, timezone
-    import json as _json
-    
-    ts = datetime.now(timezone.utc).strftime("%Y-%m-%d-%H%M%S")
-    audit_dir = os.path.join(workspace, ".singularity", "audits")
-    os.makedirs(audit_dir, exist_ok=True)
-    
-    out_path = output_path or os.path.join(audit_dir, f"{ts}.json")
-    with open(out_path, "w") as f:
-        _json.dump(audit_data, f, indent=2)
-    
-    success(f"Audit saved: {out_path}")
-    
-    # Propose roles
-    from singularity.csuite.roles import RoleRegistry
-    reg = RoleRegistry(enterprise=enterprise, industry=industry)
-    proposals = reg.propose_roles(audit_data)
-    
-    if proposals:
-        info(f"\nRecommended executives ({len(proposals)}):")
-        for p in proposals:
-            print(f"  → {p['title']} ({p['priority']}): {p['justification']}")
-
 
 def _quick_scan(workspace: str) -> dict:
     """Quick workspace scan for scaling analysis."""

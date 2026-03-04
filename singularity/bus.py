@@ -196,7 +196,12 @@ class EventBus:
     """
     
     def __init__(self, max_dead_letters: int = 100):
-        self._subscriptions: list[Subscription] = []
+        # Exact-match index: event_name → list[Subscription]
+        self._exact_subs: dict[str, list[Subscription]] = defaultdict(list)
+        # Wildcard subs only (pattern contains * or ?)
+        self._wildcard_subs: list[Subscription] = []
+        # All subscriptions (for listing/unsubscribe)
+        self._all_subs: dict[int, Subscription] = {}
         self._sub_counter: int = 0
         self._dead_letters: list[DeadLetter] = []
         self._max_dead_letters = max_dead_letters
@@ -273,21 +278,35 @@ class EventBus:
             source=source or getattr(handler, "__qualname__", str(handler)),
             _id=self._sub_counter,
         )
-        self._subscriptions.append(sub)
-        # Keep sorted by priority for ordered dispatch
-        self._subscriptions.sort(key=lambda s: s.priority)
+        self._all_subs[sub._id] = sub
+        
+        if "*" in pattern or "?" in pattern:
+            self._wildcard_subs.append(sub)
+            self._wildcard_subs.sort(key=lambda s: s.priority)
+        else:
+            self._exact_subs[pattern].append(sub)
+            self._exact_subs[pattern].sort(key=lambda s: s.priority)
+        
         logger.debug("Subscribed [%d] %s → %s (priority=%s, once=%s)",
                      sub._id, pattern, sub.source, priority.name, once)
         return sub._id
     
     def unsubscribe(self, sub_id: int) -> bool:
         """Remove a subscription by ID."""
-        before = len(self._subscriptions)
-        self._subscriptions = [s for s in self._subscriptions if s._id != sub_id]
-        removed = len(self._subscriptions) < before
-        if removed:
-            logger.debug("Unsubscribed [%d]", sub_id)
-        return removed
+        sub = self._all_subs.pop(sub_id, None)
+        if not sub:
+            return False
+        
+        if "*" in sub.pattern or "?" in sub.pattern:
+            self._wildcard_subs = [s for s in self._wildcard_subs if s._id != sub_id]
+        else:
+            subs = self._exact_subs.get(sub.pattern, [])
+            self._exact_subs[sub.pattern] = [s for s in subs if s._id != sub_id]
+            if not self._exact_subs[sub.pattern]:
+                del self._exact_subs[sub.pattern]
+        
+        logger.debug("Unsubscribed [%d]", sub_id)
+        return True
     
     # ── Publish ──────────────────────────────────────────────────────
     
@@ -346,12 +365,10 @@ class EventBus:
         logger.debug("Bus processor started")
         while self._running:
             try:
-                event = await asyncio.wait_for(self._queue.get(), timeout=1.0)
+                event = await self._queue.get()
                 if event is None:
                     break  # Sentinel — shutdown
                 await self._dispatch(event)
-            except asyncio.TimeoutError:
-                continue
             except Exception as e:
                 logger.error("Bus processor error: %s", e, exc_info=True)
         logger.debug("Bus processor stopped")
@@ -360,39 +377,56 @@ class EventBus:
         """Dispatch an event to all matching subscribers."""
         to_remove: list[int] = []
         
-        for sub in self._subscriptions:
+        # Exact-match subscribers (O(1) lookup)
+        exact = self._exact_subs.get(event.name)
+        if exact:
+            for sub in exact:
+                t0 = time.perf_counter()
+                try:
+                    await sub.handler(event)
+                    latency = time.perf_counter() - t0
+                    self._metrics.record_delivery(latency)
+                    if latency > 5.0:
+                        logger.warning("Slow handler: %s took %.2fs for %s",
+                                       sub.source, latency, event.name)
+                except Exception as e:
+                    self._metrics.record_failure(event.name)
+                    logger.error("Handler %s failed on %s: %s",
+                                 sub.source, event.name, e, exc_info=True)
+                    dl = DeadLetter(event, sub.source, e)
+                    self._dead_letters.append(dl)
+                    if len(self._dead_letters) > self._max_dead_letters:
+                        self._dead_letters = self._dead_letters[-self._max_dead_letters:]
+                if sub.once:
+                    to_remove.append(sub._id)
+        
+        # Wildcard subscribers
+        for sub in self._wildcard_subs:
             if not sub.matches(event.name):
                 continue
-            
             t0 = time.perf_counter()
             try:
                 await sub.handler(event)
                 latency = time.perf_counter() - t0
                 self._metrics.record_delivery(latency)
-                
                 if latency > 5.0:
                     logger.warning("Slow handler: %s took %.2fs for %s",
                                    sub.source, latency, event.name)
-                
             except Exception as e:
                 self._metrics.record_failure(event.name)
                 logger.error("Handler %s failed on %s: %s",
                              sub.source, event.name, e, exc_info=True)
-                
-                # Dead letter queue
                 dl = DeadLetter(event, sub.source, e)
                 self._dead_letters.append(dl)
                 if len(self._dead_letters) > self._max_dead_letters:
                     self._dead_letters = self._dead_letters[-self._max_dead_letters:]
-            
             if sub.once:
                 to_remove.append(sub._id)
         
         # Clean up one-shot subscriptions
         if to_remove:
-            self._subscriptions = [
-                s for s in self._subscriptions if s._id not in set(to_remove)
-            ]
+            for sub_id in to_remove:
+                self.unsubscribe(sub_id)
     
     # ── Middleware ────────────────────────────────────────────────────
     
@@ -418,7 +452,7 @@ class EventBus:
     
     @property
     def subscription_count(self) -> int:
-        return len(self._subscriptions)
+        return len(self._all_subs)
     
     def list_subscriptions(self) -> list[dict[str, Any]]:
         """List all active subscriptions (for debugging)."""
@@ -430,7 +464,7 @@ class EventBus:
                 "priority": s.priority.name,
                 "once": s.once,
             }
-            for s in self._subscriptions
+            for s in sorted(self._all_subs.values(), key=lambda s: s.priority)
         ]
     
     async def wait_for(self, pattern: str, timeout: float = 30.0) -> Event:

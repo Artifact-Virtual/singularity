@@ -142,6 +142,44 @@ def _choose(label: str, options: list[tuple[str, str]], default: str = "") -> st
         print(f"    {error('Invalid choice. Enter a number or key.')}")
 
 
+def _fetch_bot_guilds(token: str) -> list[dict[str, Any]]:
+    """
+    Fetch guilds the bot is a member of using the Discord REST API.
+    
+    Uses urllib (no external deps) with the bot token.
+    Returns list of guild dicts: [{id, name, owner, icon}, ...] or [].
+    """
+    import urllib.request
+    import urllib.error
+
+    url = "https://discord.com/api/v10/users/@me/guilds"
+    req = urllib.request.Request(url, headers={
+        "Authorization": f"Bot {token}",
+        "User-Agent": "Singularity-AE/1.0",
+    })
+
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode())
+            if isinstance(data, list):
+                return [
+                    {
+                        "id": g["id"],
+                        "name": g["name"],
+                        "owner": g.get("owner", False),
+                        "icon": g.get("icon"),
+                    }
+                    for g in data
+                ]
+    except urllib.error.HTTPError as e:
+        # 401 = bad token, 403 = missing scope — both mean we can't fetch
+        pass
+    except Exception:
+        pass
+
+    return []
+
+
 def _detect_workspace(path: str) -> dict[str, Any]:
     """Detect existing workspace structure and return pre-fill data."""
     ws = Path(path)
@@ -419,7 +457,7 @@ class InitWizard:
                 print(INTENT_INSTRUCTIONS)
                 _confirm("I have enabled all 3 privileged intents", default=True)
 
-            # ── Step 4: Generate invite link ──
+            # ── Step 4: Guild Selection ──
             if has_deployer and discord_config["bot_id"]:
                 invite_url = generate_invite_link(discord_config["bot_id"])
                 print()
@@ -429,17 +467,74 @@ class InitWizard:
                 print()
                 print(f"    {invite_url}")
                 print()
-                print(f"    {info('Open this link, select your server, and authorize.')}")
-                print(f"    {info('Singularity will auto-deploy channels when the bot joins.')}")
-                print()
                 discord_config["invite_url"] = invite_url
 
-                guild_id = _prompt(
-                    "Guild (server) ID (right-click server → Copy Server ID)",
-                    default=detected.get("discord_channel", ""),
-                )
-                if guild_id:
-                    discord_config["guild_ids"] = [guild_id]
+                # Try to fetch guilds the bot is already in
+                bot_guilds = _fetch_bot_guilds(discord_config["token"])
+
+                if bot_guilds:
+                    # Bot is in servers — let user pick which ones to activate
+                    print(f"    {success(f'Bot is in {len(bot_guilds)} server(s):')}")
+                    print()
+                    for i, g in enumerate(bot_guilds, 1):
+                        owner_tag = f" {dim('(owner)')}" if g.get("owner") else ""
+                        gid = g['id']
+                        print(f"      {fmt.BOLD}{i}{fmt.RESET}. {g['name']} {dim(f'({gid})')}{owner_tag}")
+                    print()
+
+                    if len(bot_guilds) == 1:
+                        # Single guild — confirm it
+                        use_it = _confirm(
+                            f"Activate Singularity on '{bot_guilds[0]['name']}'?",
+                            default=True,
+                        )
+                        if use_it:
+                            discord_config["guild_ids"] = [bot_guilds[0]["id"]]
+                        else:
+                            print(f"    {info('No guild selected. You can add guilds later in singularity.yaml.')}")
+                    else:
+                        # Multiple guilds — let user pick
+                        print(f"    {info('Enter guild numbers to activate (comma-separated), or \"all\":')}")
+                        selection = _prompt("Guilds to activate", default="all")
+
+                        if selection.strip().lower() == "all":
+                            discord_config["guild_ids"] = [g["id"] for g in bot_guilds]
+                        else:
+                            selected = []
+                            for part in selection.split(","):
+                                part = part.strip()
+                                try:
+                                    idx = int(part) - 1
+                                    if 0 <= idx < len(bot_guilds):
+                                        selected.append(bot_guilds[idx]["id"])
+                                except ValueError:
+                                    # Try matching by name or ID
+                                    for g in bot_guilds:
+                                        if part == g["id"] or part.lower() in g["name"].lower():
+                                            selected.append(g["id"])
+                            discord_config["guild_ids"] = selected
+
+                    if discord_config["guild_ids"]:
+                        names = []
+                        for gid in discord_config["guild_ids"]:
+                            name = next((g["name"] for g in bot_guilds if g["id"] == gid), gid)
+                            names.append(name)
+                        print(f"    {success('Selected: ' + ', '.join(names))}")
+
+                else:
+                    # Bot not in any guild yet — guide user
+                    print(f"    {info('Bot is not in any server yet.')}")
+                    print(f"    {info('Use the invite link above to add it, then either:')}")
+                    print(f"    {info('  • Re-run this wizard (it will detect the server)')}")
+                    print(f"    {info('  • Enter the server ID manually below')}")
+                    print()
+
+                    guild_id = _prompt(
+                        "Guild (server) ID (right-click server → Copy Server ID, or leave empty)",
+                        default="",
+                    )
+                    if guild_id:
+                        discord_config["guild_ids"] = [guild_id]
 
             owner_id = _prompt("Your Discord user ID (for owner privileges)")
             if owner_id:

@@ -26,9 +26,9 @@ import asyncio
 import json
 import logging
 import time
-import uuid
 from dataclasses import dataclass, field
 from typing import Any, Optional
+from os import urandom
 
 from ..voice.provider import ChatMessage, ChatResponse
 from ..voice.chain import ProviderChain
@@ -96,7 +96,7 @@ class AgentLoop:
         self._expanded = False
         self._tool_calls_total = 0
         self._total_tokens = 0
-        self._turn_id = str(uuid.uuid4())[:8]
+        self._turn_id = urandom(4).hex()
     
     async def run(self, messages: list[ChatMessage]) -> TurnResult:
         """Execute the agent loop.
@@ -116,8 +116,9 @@ class AgentLoop:
                 remaining = self._max_iterations - self._iteration
                 
                 # ── PULSE: Auto-expand budget if near limit ──────
-                if (remaining <= (self._max_iterations - self.config.expansion_threshold)
-                    and not self._expanded):
+                if (not self._expanded
+                    and self._iteration >= self.config.expansion_threshold):
+                    old_max = self._max_iterations
                     self._max_iterations = self.config.expanded_iterations
                     self._expanded = True
                     logger.info(
@@ -129,6 +130,9 @@ class AgentLoop:
                             "turn_id": self._turn_id,
                             "new_max": self._max_iterations,
                         }, source="cortex")
+                    # Notify BLINK that the wall moved
+                    if self.blink:
+                        self.blink.notify_cap_expanded(old_max, self._max_iterations)
                 
                 # ── THINK: Send to LLM ───────────────────────────
                 
@@ -144,6 +148,16 @@ class AgentLoop:
                         logger.info(
                             f"[{self._turn_id}] BLINK prepare injected "
                             f"({remaining_after} iterations remaining)"
+                        )
+                    elif self.blink.should_checkpoint(self._iteration):
+                        cp_msg = self.blink.get_checkpoint_message(self._iteration)
+                        messages.append(ChatMessage(
+                            role="user",
+                            content=cp_msg,
+                        ))
+                        logger.info(
+                            f"[{self._turn_id}] BLINK checkpoint at iteration "
+                            f"{self._iteration}/{self._max_iterations}"
                         )
                 
                 if self.bus:
@@ -294,19 +308,17 @@ class AgentLoop:
         fn = tool_call.get("function", {})
         name = fn.get("name", "")
         
-        # Parse arguments
-        args_raw = fn.get("arguments", "{}")
-        try:
-            if isinstance(args_raw, str):
-                # Handle empty/whitespace arguments (e.g. comb_recall with no params)
-                args_raw = args_raw.strip() if args_raw else "{}"
-                if not args_raw:
-                    args_raw = "{}"
+        # Parse arguments — fast path for common cases
+        args_raw = fn.get("arguments")
+        if not args_raw or (isinstance(args_raw, str) and not args_raw.strip()):
+            arguments = {}
+        elif isinstance(args_raw, dict):
+            arguments = args_raw
+        else:
+            try:
                 arguments = json.loads(args_raw)
-            else:
-                arguments = args_raw if args_raw is not None else {}
-        except json.JSONDecodeError:
-            return f"Error: invalid JSON arguments: {args_raw[:200]}"
+            except json.JSONDecodeError:
+                return f"Error: invalid JSON arguments: {args_raw[:200]}"
         
         # Emit tool execution event
         if self.bus:
@@ -317,17 +329,14 @@ class AgentLoop:
             }, source="cortex")
         
         # Log tool call with args summary
-        args_summary = str(arguments)[:120]
-        logger.info(
-            f"[{self._turn_id}] Tool call: {name}({args_summary})"
-        )
+        if logger.isEnabledFor(logging.INFO):
+            args_summary = str(arguments)[:120]
+            logger.info(f"[{self._turn_id}] Tool call: {name}({args_summary})")
         
         # Execute via SINEW
         result = await self.tools.execute(name, arguments)
         
-        logger.info(
-            f"[{self._turn_id}] Tool {name}: "
-            f"{len(result)} chars output"
-        )
+        if logger.isEnabledFor(logging.INFO):
+            logger.info(f"[{self._turn_id}] Tool {name}: {len(result)} chars output")
         
         return result

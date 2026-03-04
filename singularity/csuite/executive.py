@@ -128,6 +128,7 @@ class Executive:
         self._busy = False
         self._current_task: Optional[Task] = None
         self._task_history: list[TaskResult] = []
+        self._task_history_max = 50
 
         # Ensure workspace exists
         self.workspace.mkdir(parents=True, exist_ok=True)
@@ -147,6 +148,12 @@ class Executive:
     @property
     def history(self) -> list[TaskResult]:
         return list(self._task_history)
+
+    def _record_task(self, result: TaskResult) -> None:
+        """Record task result with bounded history."""
+        self._task_history.append(result)
+        if len(self._task_history) > self._task_history_max:
+            self._task_history = self._task_history[-self._task_history_max:]
 
     async def execute(self, task: Task) -> TaskResult:
         """
@@ -278,7 +285,7 @@ class Executive:
                     "description": task.description[:200],
                 })
 
-            self._task_history.append(result)
+            self._record_task(result)
             return result
 
         except Exception as e:
@@ -292,7 +299,7 @@ class Executive:
                 duration_seconds=elapsed,
                 iterations_used=iterations,
             )
-            self._task_history.append(result)
+            self._record_task(result)
             await self.bus.emit("csuite.task.failed", result.to_dict())
             return result
 

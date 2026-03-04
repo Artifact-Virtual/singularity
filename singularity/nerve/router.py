@@ -41,6 +41,11 @@ INTERRUPT_PATTERNS = [
     re.compile(r"^(scratch that|forget it|hold up)", re.IGNORECASE),
 ]
 
+# ── Pre-compiled regex ──────────────────────────────────────────────
+
+_RE_JID_DEVICE = re.compile(r":\d+@s\.whatsapp\.net$")
+_RE_AT_END = re.compile(r'@end\b', re.IGNORECASE)
+
 
 # ── JID Normalization (WhatsApp) ────────────────────────────────────
 
@@ -49,7 +54,7 @@ def _normalize_jid(jid: str) -> str:
     
     "num:device@s.whatsapp.net" → "num@s.whatsapp.net"
     """
-    return re.sub(r":\d+@s\.whatsapp\.net$", "@s.whatsapp.net", jid)
+    return _RE_JID_DEVICE.sub(r"@s.whatsapp.net", jid)
 
 
 def _jid_matches(jid: str, target: str) -> bool:
@@ -58,7 +63,7 @@ def _jid_matches(jid: str, target: str) -> bool:
 
 def _jid_in_list(jid: str, targets: list[str]) -> bool:
     normalized = _normalize_jid(jid)
-    return any(_normalize_jid(t) == normalized for t in targets)
+    return any(normalized == _normalize_jid(t) for t in targets)
 
 
 # ── Deduplication Cache ─────────────────────────────────────────────
@@ -186,7 +191,7 @@ class InboundRouter:
 
         # 2a. @end — universal conversation terminator. Any message containing @end
         # signals "do not respond." Both bots honor this. No LLM turn, no reaction.
-        if payload.text and re.search(r'@end\b', payload.text, re.IGNORECASE):
+        if payload.text and _RE_AT_END.search(payload.text):
             logger.info("@end terminator: %s in %s — not responding", source.sender_id, source.chat_id)
             return False
 

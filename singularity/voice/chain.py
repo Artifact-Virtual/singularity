@@ -17,7 +17,6 @@ Events emitted:
 from __future__ import annotations
 
 import logging
-import time
 from typing import AsyncIterator, Optional, Any
 
 from .provider import ChatProvider, ChatMessage, ChatResponse, StreamChunk
@@ -90,12 +89,10 @@ class ProviderChain:
                 continue
             
             try:
-                t0 = time.perf_counter()
                 response = await provider.chat(
                     messages, tools=tools, temperature=temperature,
                     max_tokens=max_tokens, **kwargs
                 )
-                latency = (time.perf_counter() - t0) * 1000
                 
                 # Track active provider + emit event if it changed
                 if self._active_provider != provider:
@@ -113,12 +110,12 @@ class ProviderChain:
                 else:
                     self._active_provider = provider
                 
-                # Emit completion event
+                # Emit completion event (use latency from response itself)
                 if self.bus:
                     await self.bus.emit_nowait("voice.chat.complete", {
                         "provider": provider.name,
                         "model": response.model,
-                        "latency_ms": round(latency),
+                        "latency_ms": round(response.latency_ms),
                         "input_tokens": response.usage.get("input_tokens", 0),
                         "output_tokens": response.usage.get("output_tokens", 0),
                         "tool_calls": len(response.tool_calls),

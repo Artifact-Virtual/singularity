@@ -38,6 +38,20 @@ import re
 
 logger = logging.getLogger("singularity.runtime")
 
+# C-Suite constants (shared by _boot_csuite and _extract_exec_roles)
+_CSUITE_NAMES = frozenset({"cto", "coo", "cfo", "ciso", "cro", "cpo", "cmo", "cdo", "cco"})
+_CSUITE__CSUITE_TITLE_MAP = {
+    "cto": "Chief Technology Officer",
+    "coo": "Chief Operating Officer",
+    "cfo": "Chief Financial Officer",
+    "ciso": "Chief Information Security Officer",
+    "cro": "Chief Risk Officer",
+    "cpo": "Chief Product Officer",
+    "cmo": "Chief Marketing Officer",
+    "cdo": "Chief Data Officer",
+    "cco": "Chief Compliance Officer",
+}
+
 
 def _ensure_mention(text: str, sender_id: str | None, channel_type: str = "discord") -> str:
     """Ensure the response contains an @mention of the sender (Discord only).
@@ -52,7 +66,6 @@ def _ensure_mention(text: str, sender_id: str | None, channel_type: str = "disco
     # CHECK FOR LOOP BREAKERS — strip mentions to drop conversation
     if "@end" in text.lower() or "@drop" in text.lower():
         # Strip ALL @mentions to break cross-bot loops
-        import re
         text = re.sub(r'<@!?\d+>', '', text).strip()
         # Clean up any resulting double spaces
         text = re.sub(r'\s+', ' ', text).strip()
@@ -299,6 +312,10 @@ class Runtime:
             max_output=tc.exec_max_output,
         )
         logger.info(f"  SINEW ready (workspace: {tc.workspace})")
+        
+        # Wire COMB into executor (memory booted in Phase 2, before SINEW)
+        if self.comb:
+            self.tools.set_comb(self.comb)
     
     async def _boot_voice(self) -> None:
         """Initialize LLM provider chain."""
@@ -401,19 +418,17 @@ class Runtime:
         enterprise = "Artifact Virtual"
         registry = RoleRegistry(enterprise=enterprise)
         
-        CSUITE_NAMES = {"cto", "coo", "cfo", "ciso", "cro", "cpo", "cmo", "cdo", "cco"}
-        
         # Collect exec persona configs (from both personas and csuite.personas)
         exec_personas = []
         seen = set()
         for persona in self.config.personas:
             role_id = persona.name.lower()
-            if role_id in CSUITE_NAMES and role_id not in seen:
+            if role_id in _CSUITE_NAMES and role_id not in seen:
                 exec_personas.append(persona)
                 seen.add(role_id)
         for persona in self.config.csuite.personas:
             role_id = persona.name.lower()
-            if role_id in CSUITE_NAMES and role_id not in seen:
+            if role_id in _CSUITE_NAMES and role_id not in seen:
                 exec_personas.append(persona)
                 seen.add(role_id)
         
@@ -430,7 +445,7 @@ class Runtime:
             defaults = _ROLE_DEFAULTS.get(role_id, _ROLE_DEFAULTS.get("custom", {}))
             
             # Build the role
-            title_map = {
+            _CSUITE__CSUITE_TITLE_MAP = {
                 "cto": "Chief Technology Officer",
                 "coo": "Chief Operating Officer",
                 "cfo": "Chief Financial Officer",
@@ -441,7 +456,7 @@ class Runtime:
                 "cdo": "Chief Data Officer",
                 "cco": "Chief Compliance Officer",
             }
-            title = title_map.get(role_id, f"Chief {role_id.upper()} Officer")
+            title = _CSUITE__CSUITE_TITLE_MAP.get(role_id, f"Chief {role_id.upper()} Officer")
             
             role = Role(
                 role_type=role_type,
@@ -513,6 +528,7 @@ class Runtime:
         from .nerve.deployer import GuildDeployer
         
         exec_roles = self._extract_exec_roles()
+        dc = self.config.discord
         
         if exec_roles:
             sg_dir = Path(self.workspace) / ".singularity"
@@ -521,6 +537,7 @@ class Runtime:
                 private=True,
                 event_callback=self._deployer_event_callback,
                 sg_dir=sg_dir,
+                authorized_user_ids=dc.authorized_users if dc else [],
             )
             logger.info(f"  DEPLOYER ready ({len(exec_roles)} exec roles)")
         else:
@@ -611,6 +628,8 @@ class Runtime:
                     "bot_id": dc.bot_user_id,
                     "sibling_bot_ids": dc.sister_bot_ids,
                     "guild_ids": dc.guild_ids,
+                    "alert_channels": self.config.immune.alert_channels,
+                    "authorized_users": dc.authorized_users,
                 }
                 
                 # Wire deployer if available (from _boot_deployer phase)
@@ -641,9 +660,8 @@ class Runtime:
         from .csuite.roles import _ROLE_DEFAULTS
         
         # Standard C-Suite role names that should be deployed as channels
-        CSUITE_NAMES = {"cto", "coo", "cfo", "ciso", "cro", "cpo", "cmo", "cdo", "cco"}
         
-        TITLE_MAP = {
+        _CSUITE_TITLE_MAP = {
             "cto": "Chief Technology Officer",
             "coo": "Chief Operating Officer",
             "cfo": "Chief Financial Officer",
@@ -660,11 +678,11 @@ class Runtime:
         
         for persona in self.config.personas:
             role_id = persona.name.lower()
-            if role_id in CSUITE_NAMES and role_id not in seen:
+            if role_id in _CSUITE_NAMES and role_id not in seen:
                 defaults = _ROLE_DEFAULTS.get(role_id, _ROLE_DEFAULTS.get("custom", {}))
                 # Prefer explicit config values, fallback to role defaults
                 emoji = persona.emoji or defaults.get("emoji", "👤")
-                title = persona.title or TITLE_MAP.get(role_id, f"Chief {role_id.upper()} Officer")
+                title = persona.title or _CSUITE_TITLE_MAP.get(role_id, f"Chief {role_id.upper()} Officer")
                 domain = persona.domain or defaults.get("domain", "")
                 exec_roles.append((role_id, emoji, title, domain))
                 seen.add(role_id)
@@ -673,10 +691,10 @@ class Runtime:
         # Also check csuite.personas if any exist there
         for persona in self.config.csuite.personas:
             role_id = persona.name.lower()
-            if role_id in CSUITE_NAMES and role_id not in seen:
+            if role_id in _CSUITE_NAMES and role_id not in seen:
                 defaults = _ROLE_DEFAULTS.get(role_id, _ROLE_DEFAULTS.get("custom", {}))
                 emoji = persona.emoji or defaults.get("emoji", "👤")
-                title = persona.title or TITLE_MAP.get(role_id, f"Chief {role_id.upper()} Officer")
+                title = persona.title or _CSUITE_TITLE_MAP.get(role_id, f"Chief {role_id.upper()} Officer")
                 domain = persona.domain or defaults.get("domain", "")
                 exec_roles.append((role_id, emoji, title, domain))
                 seen.add(role_id)

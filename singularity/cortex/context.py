@@ -96,14 +96,10 @@ class ContextAssembler:
         """Estimate the character cost of a message, including tool_calls metadata."""
         chars = len(msg.content or "")
         if msg.tool_calls:
-            # tool_calls is a list of dicts — estimate their JSON size
-            import json
-            try:
-                chars += len(json.dumps(msg.tool_calls))
-            except (TypeError, ValueError):
-                chars += 200 * len(msg.tool_calls)  # fallback estimate
+            # Fast estimate: ~200 chars per tool call avoids json.dumps overhead
+            chars += 200 * len(msg.tool_calls)
         if msg.tool_call_id:
-            chars += len(msg.tool_call_id) + 20  # overhead for the field
+            chars += len(msg.tool_call_id) + 20
         if msg.name:
             chars += len(msg.name) + 10
         return chars
@@ -154,19 +150,21 @@ class ContextAssembler:
                 i += 1
         
         # Walk backwards (newest units first), keeping units that fit
-        kept_indices: set[int] = set()
+        keep_from = len(units)  # Index into units list: keep units[keep_from:]
         running_chars = 0
         
-        for unit in reversed(units):
-            unit_chars = sum(self._estimate_message_chars(history[idx]) for idx in unit)
+        for i in range(len(units) - 1, -1, -1):
+            unit_chars = sum(self._estimate_message_chars(history[idx]) for idx in units[i])
             if running_chars + unit_chars > budget_chars:
                 break
-            for idx in unit:
-                kept_indices.add(idx)
+            keep_from = i
             running_chars += unit_chars
         
-        # Build result preserving original order
-        result = [history[i] for i in range(len(history)) if i in kept_indices]
+        # Flatten kept units to message indices and build result
+        result = []
+        for unit in units[keep_from:]:
+            for idx in unit:
+                result.append(history[idx])
         
         if len(result) < len(history):
             dropped = len(history) - len(result)

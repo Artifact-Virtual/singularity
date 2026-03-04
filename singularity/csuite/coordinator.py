@@ -112,6 +112,7 @@ class Coordinator:
         self.executives = executives
         self.workspace = workspace
         self._dispatch_history: list[DispatchResult] = []
+        self._dispatch_history_max = 100
         self._task_queue: asyncio.Queue[tuple[Task, RoleType]] = asyncio.Queue(maxsize=100)
         self._standing_orders: list[StandingOrder] = []
         self._running = False
@@ -222,6 +223,8 @@ class Coordinator:
         await self.bus.emit("csuite.dispatch.completed", result.to_dict())
 
         self._dispatch_history.append(result)
+        if len(self._dispatch_history) > self._dispatch_history_max:
+            self._dispatch_history = self._dispatch_history[-self._dispatch_history_max:]
         logger.info(result.summary())
 
         return result

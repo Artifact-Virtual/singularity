@@ -36,6 +36,7 @@ Anti-patterns this prevents:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from dataclasses import dataclass, field
@@ -63,6 +64,7 @@ class BlinkConfig:
     prepare_at: int = 3         # Inject preparation message at N remaining
     flush_at: int = 1           # Force flush at N remaining
     cooldown_seconds: float = 1.0  # Delay between blink and resume
+    checkpoint_interval: int = 25   # Inject checkpoint message every N iterations
 
 
 @dataclass
@@ -74,6 +76,8 @@ class BlinkState:
     total_tool_calls: int = 0               # Sum across all blinks
     blink_timestamps: list[float] = field(default_factory=list)
     prepared: bool = False                  # Whether prepare message was injected
+    last_checkpoint_at: int = 0              # Iteration of last checkpoint
+    cap_expansions: int = 0                  # How many times PULSE expanded the cap
 
 
 BLINK_PREPARE_MESSAGE = """⚡ BLINK APPROACHING — You are about to seamlessly continue into a fresh iteration budget.
@@ -94,6 +98,16 @@ BLINK_RESUME_MESSAGE = """⚡ BLINK COMPLETE — You are continuing from where y
 
 **Blink depth:** {depth}/{max_depth}
 **Total iterations so far:** {total_iterations}"""
+
+
+BLINK_CHECKPOINT_MESSAGE = """🔖 CHECKPOINT — You have been running for a while. This is a periodic safety save.
+
+**What to do NOW (in this order):**
+1. If you have critical work-in-progress state, call `comb_stage` with a brief summary of what you're doing and where you are
+2. Then continue working normally — this is NOT a shutdown, just a save point
+3. If you have nothing critical to save, ignore this and keep working
+
+This checkpoint exists so that if the session is interrupted externally, your progress is recoverable."""
 
 
 class BlinkController:
@@ -172,6 +186,44 @@ class BlinkController:
         self.state.phase = BlinkPhase.PREPARE
         return BLINK_PREPARE_MESSAGE
     
+    def should_checkpoint(self, current_iteration: int) -> bool:
+        """Should we inject a periodic checkpoint message?
+        
+        Checkpoints ensure state is saved regularly during long runs,
+        so external kills (SIGTERM, OOM, crash) don't lose everything.
+        Fires every `checkpoint_interval` iterations, but NOT when
+        prepare is already active (approaching the wall).
+        """
+        if not self.config.enabled:
+            return False
+        if self.config.checkpoint_interval <= 0:
+            return False
+        if current_iteration < self.config.checkpoint_interval:
+            return False
+        if self.state.prepared:
+            return False  # Don't checkpoint when prepare is active
+        iters_since = current_iteration - self.state.last_checkpoint_at
+        return iters_since >= self.config.checkpoint_interval
+    
+    def get_checkpoint_message(self, current_iteration: int) -> str:
+        """Get checkpoint message and record that we checkpointed."""
+        self.state.last_checkpoint_at = current_iteration
+        return BLINK_CHECKPOINT_MESSAGE
+    
+    def notify_cap_expanded(self, old_cap: int, new_cap: int) -> None:
+        """PULSE expanded the iteration cap. Re-arm prepare for the new wall.
+        
+        Without this, BLINK fires prepare at iter 17 (for cap 20), PULSE
+        expands to 100 at iter 18, and BLINK never fires again — leaving
+        82 iterations with no safety net.
+        """
+        self.state.prepared = False
+        self.state.cap_expansions += 1
+        logger.info(
+            f"[{self.session_id}] Cap expanded {old_cap} → {new_cap}. "
+            f"Prepare re-armed. Expansion #{self.state.cap_expansions}"
+        )
+    
     def get_resume_message(self) -> str:
         """Get the resume system message for the new turn."""
         return BLINK_RESUME_MESSAGE.format(
@@ -187,6 +239,7 @@ class BlinkController:
         self.state.total_tool_calls += tool_calls
         self.state.blink_timestamps.append(time.time())
         self.state.prepared = False  # Reset for next cycle
+        self.state.last_checkpoint_at = 0  # Reset checkpoint counter for new blink cycle
         self.state.phase = BlinkPhase.BLINKING
         
         logger.info(
@@ -223,12 +276,9 @@ class BlinkController:
     def _emit(self, topic: str, data: dict) -> None:
         """Fire event on bus (best-effort, non-blocking)."""
         if self.bus:
-            import asyncio
             try:
                 loop = asyncio.get_running_loop()
-                task = loop.create_task(self.bus.emit(topic, data))
-                # prevent GC of fire-and-forget tasks
-                task.add_done_callback(lambda t: t.exception() if not t.cancelled() and t.exception() else None)
+                loop.create_task(self.bus.emit_nowait(topic, data, source="cortex"))
             except RuntimeError:
                 # No running loop — can't emit, that's OK
                 pass

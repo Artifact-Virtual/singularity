@@ -171,16 +171,16 @@ class CortexEngine:
                 history_msgs = await self.sessions.get_messages(session_id)
                 
                 # Convert to ChatMessages for the LLM
-                chat_history = [
-                    ChatMessage(
-                        role=m.role,
-                        content=m.content or "",
-                        tool_calls=m.tool_calls,
-                        tool_call_id=m.tool_call_id,
-                        name=m.name,
-                    )
-                    for m in history_msgs
-                ]
+                # Use direct attribute access instead of keyword construction
+                chat_history = []
+                for m in history_msgs:
+                    cm = ChatMessage.__new__(ChatMessage)
+                    cm.role = m.role
+                    cm.content = m.content or ""
+                    cm.tool_calls = m.tool_calls
+                    cm.tool_call_id = m.tool_call_id
+                    cm.name = m.name
+                    chat_history.append(cm)
                 
                 # If this is a blink resume, inject the resume context
                 if blink.state.depth > 0:

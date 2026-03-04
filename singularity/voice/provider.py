@@ -15,7 +15,6 @@ Design:
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import time
 from abc import ABC, abstractmethod
@@ -121,7 +120,7 @@ class ChatProvider(ABC):
         usage = {}
         
         # Accumulators for streamed tool calls
-        tc_accum: dict[int, dict] = {}  # index → {id, type, function: {name, arguments}}
+        tc_accum: dict[int, dict] = {}  # index → {id, type, function: {name, arguments_parts}}
         
         async for chunk in self.chat_stream(
             messages, tools=tools, temperature=temperature,
@@ -137,7 +136,7 @@ class ChatProvider(ABC):
                     tc_accum[idx] = {
                         "id": tcd.get("id", ""),
                         "type": "function",
-                        "function": {"name": "", "arguments": ""},
+                        "function": {"name": "", "arguments_parts": []},
                     }
                 if tcd.get("id"):
                     tc_accum[idx]["id"] = tcd["id"]
@@ -145,7 +144,7 @@ class ChatProvider(ABC):
                 if fn.get("name"):
                     tc_accum[idx]["function"]["name"] = fn["name"]
                 if fn.get("arguments"):
-                    tc_accum[idx]["function"]["arguments"] += fn["arguments"]
+                    tc_accum[idx]["function"]["arguments_parts"].append(fn["arguments"])
             
             if chunk.finish_reason:
                 finish_reason = chunk.finish_reason
@@ -153,7 +152,17 @@ class ChatProvider(ABC):
                 usage = chunk.usage
         
         if tc_accum:
-            tool_calls = [tc_accum[i] for i in sorted(tc_accum.keys())]
+            tool_calls = []
+            for i in sorted(tc_accum.keys()):
+                tc = tc_accum[i]
+                tool_calls.append({
+                    "id": tc["id"],
+                    "type": tc["type"],
+                    "function": {
+                        "name": tc["function"]["name"],
+                        "arguments": "".join(tc["function"]["arguments_parts"]),
+                    },
+                })
             if finish_reason == "stop":
                 finish_reason = "tool_calls"
         

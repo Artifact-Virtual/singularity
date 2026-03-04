@@ -29,12 +29,20 @@ import asyncio
 import json
 import logging
 import os
+import re
 import subprocess
 import time
 from pathlib import Path
 from typing import Any, Optional
 
+from .sandbox import validate_command, validate_path
+
 logger = logging.getLogger("singularity.sinew.executor")
+
+# Pre-compiled regex for mention detection/stripping (hot path)
+_RE_DISCORD_MENTION = re.compile(r'<@!?\d+>')
+_RE_MENTION_STRIP = re.compile(r'<@!?\d+>')
+_RE_AT_USERNAME = re.compile(r'@\w+')
 
 
 class ToolExecutor:
@@ -53,6 +61,8 @@ class ToolExecutor:
         self._background_procs: dict[str, asyncio.subprocess.Process] = {}
         self._discord_adapter: Any = None  # Set by runtime after boot
         self._csuite_dispatcher: Any = None  # Set by runtime after C-Suite boot
+        self._comb: Any = None  # Set by runtime after memory boot
+        self._hektor: Any = None  # Lazy-initialized HektorMemory instance
         self._current_sender_id: str | None = None  # For @mention enforcement
     
     def set_discord_adapter(self, adapter: Any) -> None:
@@ -62,6 +72,10 @@ class ToolExecutor:
     def set_csuite_dispatcher(self, dispatcher: Any) -> None:
         """Wire the C-Suite dispatcher for csuite_dispatch tool."""
         self._csuite_dispatcher = dispatcher
+    
+    def set_comb(self, comb: Any) -> None:
+        """Wire the COMB memory instance (shared with runtime, avoids re-init per call)."""
+        self._comb = comb
     
     def set_current_sender(self, sender_id: str | None) -> None:
         """Set the current message sender for @mention enforcement."""
@@ -132,7 +146,6 @@ class ToolExecutor:
             return "Error: no command provided"
         
         # Sandbox check
-        from .sandbox import validate_command
         violation = validate_command(command)
         if violation:
             return f"Blocked: {violation}"
@@ -196,7 +209,6 @@ class ToolExecutor:
         if not p.is_absolute():
             p = self.workspace / p
         
-        from .sandbox import validate_path
         violation = validate_path(str(p))
         if violation:
             return f"Blocked: {violation}"
@@ -233,7 +245,6 @@ class ToolExecutor:
         if not p.is_absolute():
             p = self.workspace / p
         
-        from .sandbox import validate_path
         violation = validate_path(str(p))
         if violation:
             return f"Blocked: {violation}"
@@ -259,7 +270,6 @@ class ToolExecutor:
         if not p.is_absolute():
             p = self.workspace / p
         
-        from .sandbox import validate_path
         violation = validate_path(str(p))
         if violation:
             return f"Blocked: {violation}"
@@ -301,8 +311,6 @@ class ToolExecutor:
                     ct = resp.headers.get("content-type", "")
                     if "html" in ct.lower():
                         try:
-                            from html.parser import HTMLParser
-                            import re
                             text = re.sub(r'<script[^>]*>.*?</script>', '', text, flags=re.DOTALL)
                             text = re.sub(r'<style[^>]*>.*?</style>', '', text, flags=re.DOTALL)
                             text = re.sub(r'<[^>]+>', ' ', text)
@@ -341,8 +349,7 @@ class ToolExecutor:
             # Normal @mention enforcement — if sender is known and not already mentioned, prepend
             if self._current_sender_id and f"<@{self._current_sender_id}>" not in content and f"<@!{self._current_sender_id}>" not in content:
                 # Only auto-prepend if no OTHER @mention is present (LLM may be addressing someone specific)
-                import re
-                if not re.search(r'<@!?\d+>', content):
+                if not _RE_DISCORD_MENTION.search(content):
                     content = f"<@{self._current_sender_id}> {content}"
         
         # Use the adapter reference if wired
@@ -375,11 +382,10 @@ class ToolExecutor:
     
     def _strip_mentions(self, content: str) -> str:
         """Remove @mentions from content."""
-        import re
         # Remove Discord mentions: <@123456789> and <@!123456789>
-        content = re.sub(r'<@!?\d+>', '', content)
+        content = _RE_MENTION_STRIP.sub('', content)
         # Remove @username patterns
-        content = re.sub(r'@\w+', '', content)
+        content = _RE_AT_USERNAME.sub('', content)
         return content.strip()
     
     async def _tool_discord_react(self, args: dict) -> str:
@@ -409,12 +415,16 @@ class ToolExecutor:
             return "Error: content required"
         
         try:
-            # Use Singularity's native CombMemory at .core/memory/comb/
-            from ..memory.comb import CombMemory
-            comb_path = self.workspace / "singularity" / ".core" / "memory" / "comb"
-            comb = CombMemory(store_path=str(comb_path))
-            await comb.initialize()
-            success = await comb.stage(content)
+            if self._comb:
+                success = await self._comb.stage(content)
+            else:
+                # Fallback: create instance (shouldn't happen if runtime wired correctly)
+                from ..memory.comb import CombMemory
+                comb_path = self.workspace / "singularity" / ".core" / "memory" / "comb"
+                comb = CombMemory(store_path=str(comb_path))
+                await comb.initialize()
+                success = await comb.stage(content)
+            
             if success:
                 return f"✅ Staged {len(content)} chars into COMB"
             return "COMB stage failed"
@@ -424,12 +434,16 @@ class ToolExecutor:
     async def _tool_comb_recall(self, args: dict) -> str:
         """Recall operational memory from COMB."""
         try:
-            # Use Singularity's native CombMemory at .core/memory/comb/
-            from ..memory.comb import CombMemory
-            comb_path = self.workspace / "singularity" / ".core" / "memory" / "comb"
-            comb = CombMemory(store_path=str(comb_path))
-            await comb.initialize()
-            result = await comb.recall()
+            if self._comb:
+                result = await self._comb.recall()
+            else:
+                # Fallback: create instance
+                from ..memory.comb import CombMemory
+                comb_path = self.workspace / "singularity" / ".core" / "memory" / "comb"
+                comb = CombMemory(store_path=str(comb_path))
+                await comb.initialize()
+                result = await comb.recall()
+            
             return result or "(no COMB data)"
         except Exception as e:
             return f"COMB recall error: {e}"
@@ -445,9 +459,10 @@ class ToolExecutor:
             return "Error: query required"
         
         try:
-            from ..memory.hektor import HektorMemory
-            hektor = HektorMemory(workspace=self.workspace)
-            results = await hektor.search(query, k=k)
+            if not self._hektor:
+                from ..memory.hektor import HektorMemory
+                self._hektor = HektorMemory(workspace=self.workspace)
+            results = await self._hektor.search(query, k=k)
             
             if not results:
                 return f"No results for: {query}"

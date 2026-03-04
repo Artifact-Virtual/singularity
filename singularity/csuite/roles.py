@@ -688,22 +688,45 @@ _ROLE_DEFAULTS: dict[str, dict] = {
 }
 
 
+# Module-level cached roles for match_roles (built once, reused)
+_CACHED_MATCH_ROLES: list[Role] | None = None
+
+
+def _get_match_roles() -> list[Role]:
+    """Get cached Role objects for keyword matching (avoid rebuilding every call)."""
+    global _CACHED_MATCH_ROLES
+    if _CACHED_MATCH_ROLES is None:
+        roles = []
+        for rt_name, defaults in _ROLE_DEFAULTS.items():
+            if rt_name == "custom":
+                continue
+            try:
+                rt = RoleType(rt_name)
+                role = Role(
+                    role_type=rt,
+                    title=defaults.get("title", f"C{rt_name[1:].upper()}O"),
+                    emoji=defaults["emoji"],
+                    domain=defaults["domain"],
+                    keywords=defaults.get("keywords", []),
+                )
+                roles.append(role)
+            except (ValueError, KeyError):
+                continue
+        _CACHED_MATCH_ROLES = roles
+    return _CACHED_MATCH_ROLES
+
+
 def match_roles(task: str, threshold: float = 0.05) -> list[tuple[Role, float]]:
-    """Backward-compatible function for matching tasks to default roles."""
-    registry = RoleRegistry()
-    for rt_name, defaults in _ROLE_DEFAULTS.items():
-        if rt_name == "custom":
+    """Match a task description to roles by keyword relevance. Cached for performance."""
+    roles = _get_match_roles()
+    matches = []
+    task_lower = task.lower()
+    for role in roles:
+        if not role.keywords:
             continue
-        try:
-            rt = RoleType(rt_name)
-            role = Role(
-                role_type=rt,
-                title=defaults.get("title", f"C{rt_name[1:].upper()}O"),
-                emoji=defaults["emoji"],
-                domain=defaults["domain"],
-                keywords=defaults.get("keywords", []),
-            )
-            registry.register(role)
-        except (ValueError, KeyError):
-            continue
-    return registry.match(task, threshold)
+        hits = sum(1 for kw in role.keywords if kw.lower() in task_lower)
+        score = min(hits / len(role.keywords), 1.0)
+        if score >= threshold:
+            matches.append((role, score))
+    matches.sort(key=lambda x: x[1], reverse=True)
+    return matches

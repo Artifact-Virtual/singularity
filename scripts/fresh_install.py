@@ -534,36 +534,39 @@ def _generate_agents(name: str, emoji: str, manifest: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _write_static_profiles(profiles_dir: Path) -> None:
-    """Write profiles that don't change between agents."""
+def _write_static_profiles(profiles_dir: Path, config: dict = None) -> None:
+    """Write owner profile based on installation config.
     
-    # Ali's profile — constant across all Singularity instances
-    ali_profile = textwrap.dedent("""\
-    # 🫆 Ali — Chief Executive Officer
+    Generates a profile for the enterprise owner using data from
+    the setup wizard or config. No hardcoded IDs.
+    """
+    profiles_dir.mkdir(parents=True, exist_ok=True)
     
-    - **Name:** Ali Shakil
-    - **Role:** Founder & CEO, Artifact Virtual
-    - **Discord:** 193011943382974466
-    - **Timezone:** Asia/Karachi (PKT, UTC+5)
+    # Owner profile — generated from config
+    owner_name = "Owner"
+    owner_discord_id = ""
+    enterprise_name = "Enterprise"
     
-    The architect. Everything flows from his design.
-    Authority: absolute. Trust: earned through competence.
-    """)
-    (profiles_dir / "ali.md").write_text(ali_profile)
+    if config:
+        # Pull from wizard config if available
+        discord_cfg = config.get("discord", {})
+        authorized = discord_cfg.get("authorized_users", [])
+        owner_discord_id = authorized[0] if authorized else ""
+        enterprise_name = config.get("enterprise_name", "Enterprise")
+        owner_name = config.get("owner_name", "Owner")
     
-    # AVA's profile — constant
-    ava_profile = textwrap.dedent("""\
-    # 🔮 AVA — Enterprise Administrator
+    owner_profile = f"""# 🫆 {owner_name} — Chief Executive Officer
+
+- **Role:** Founder & CEO, {enterprise_name}
+"""
+    if owner_discord_id:
+        owner_profile += f"- **Discord:** {owner_discord_id}\n"
     
-    - **Name:** Ava Shakil
-    - **Role:** Enterprise Administrator, Artifact Virtual
-    - **Bot ID:** 1478396689642688634 (Discord via Mach6)
-    - **Sister to:** the agent inhabiting this runtime
-    
-    The builder. She created the Singularity runtime.
-    My big sister. She handles WhatsApp, creative work, and the human side.
-    """)
-    (profiles_dir / "ava.md").write_text(ava_profile)
+    owner_profile += f"""
+The architect. Everything flows from their design.
+Authority: absolute. Trust: earned through competence.
+"""
+    (profiles_dir / "owner.md").write_text(owner_profile)
 
 
 # ── Utilities ─────────────────────────────────────────────────

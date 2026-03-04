@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import subprocess
 import time
 from pathlib import Path
@@ -160,7 +161,6 @@ class CopilotProxyProvider(ChatProvider):
     
     def _derive_base_url(self, token: str) -> str:
         """Extract base URL from copilot token (proxy-ep field)."""
-        import re
         match = re.search(r"(?:^|;)\s*proxy-ep=([^;\s]+)", token, re.IGNORECASE)
         if match:
             ep = match.group(1).strip()
@@ -256,21 +256,14 @@ class CopilotProxyProvider(ChatProvider):
                 self.record_failure(e)
                 raise
     
-    async def _stream_via_proxy(
+    def _build_request_body(
         self,
         messages: list[ChatMessage],
         tools: Optional[list[dict]],
         temperature: float,
         max_tokens: int,
-        **kwargs,
-    ) -> AsyncIterator[StreamChunk]:
-        """Stream via the Mach6 Copilot proxy (localhost:3000).
-        
-        Mach6 handles all token exchange internally.
-        We just send OpenAI-compatible requests to it.
-        """
-        await self.initialize()
-        
+    ) -> dict:
+        """Build the OpenAI-compatible request body (shared by proxy + direct)."""
         body: dict = {
             "model": self.model,
             "stream": True,
@@ -283,82 +276,120 @@ class CopilotProxyProvider(ChatProvider):
             body["temperature"] = temperature
         if tools:
             body["tools"] = tools
+        return body
+    
+    @staticmethod
+    def _parse_sse_chunk(parsed: dict) -> list[StreamChunk]:
+        """Parse a single SSE JSON object into StreamChunks.
         
+        Returns a list (usually 0-2 chunks) to avoid repeated yield logic.
+        Shared by both proxy and direct streaming paths.
+        """
+        chunks: list[StreamChunk] = []
+        
+        # Usage chunk
+        usage = parsed.get("usage")
+        if usage and usage.get("total_tokens"):
+            chunks.append(StreamChunk(
+                usage={
+                    "input_tokens": usage.get("prompt_tokens", 0),
+                    "output_tokens": usage.get("completion_tokens", 0),
+                }
+            ))
+        
+        choices = parsed.get("choices")
+        if not choices:
+            return chunks
+        
+        choice = choices[0]
+        delta = choice.get("delta")
+        if not delta:
+            # Check finish_reason even without delta
+            finish = choice.get("finish_reason")
+            if finish:
+                chunks.append(StreamChunk(finish_reason=finish))
+            return chunks
+        
+        # Text content
+        content = delta.get("content")
+        if content:
+            chunks.append(StreamChunk(delta=content))
+        
+        # Tool calls
+        tc_list = delta.get("tool_calls")
+        if tc_list:
+            for tc in tc_list:
+                fn = tc.get("function", {})
+                chunks.append(StreamChunk(tool_call_delta={
+                    "index": tc.get("index", 0),
+                    "id": tc.get("id", ""),
+                    "function": {
+                        "name": fn.get("name", ""),
+                        "arguments": fn.get("arguments", ""),
+                    },
+                }))
+        
+        # Finish reason
+        finish = choice.get("finish_reason")
+        if finish:
+            chunks.append(StreamChunk(finish_reason=finish))
+        
+        return chunks
+    
+    async def _stream_sse_response(self, resp: aiohttp.ClientResponse) -> AsyncIterator[StreamChunk]:
+        """Parse an SSE response stream into StreamChunks.
+        
+        Shared by both proxy and direct streaming paths.
+        Handles buffering, line splitting, JSON parsing, and chunk emission.
+        """
+        buffer = ""
+        async for raw_bytes in resp.content.iter_any():
+            buffer += raw_bytes.decode("utf-8", errors="replace")
+            
+            # Split on newlines, keep incomplete tail
+            lines = buffer.split("\n")
+            buffer = lines[-1]  # Keep the last (possibly incomplete) segment
+            
+            for line in lines[:-1]:
+                if not line.startswith("data: "):
+                    continue
+                data = line[6:].strip()
+                
+                if data == "[DONE]":
+                    return
+                
+                try:
+                    parsed = json.loads(data)
+                except json.JSONDecodeError:
+                    continue
+                
+                for chunk in self._parse_sse_chunk(parsed):
+                    yield chunk
+    
+    async def _stream_via_proxy(
+        self,
+        messages: list[ChatMessage],
+        tools: Optional[list[dict]],
+        temperature: float,
+        max_tokens: int,
+        **kwargs,
+    ) -> AsyncIterator[StreamChunk]:
+        """Stream via the Mach6 Copilot proxy (localhost:3000)."""
+        await self.initialize()
+        
+        body = self._build_request_body(messages, tools, temperature, max_tokens)
         endpoint = f"{self._proxy_endpoint.rstrip('/')}/chat/completions"
-        
-        headers = {
-            "Content-Type": "application/json",
-            **COPILOT_HEADERS,
-        }
+        headers = {"Content-Type": "application/json", **COPILOT_HEADERS}
         
         try:
-            async with self._session.post(
-                endpoint, json=body, headers=headers,
-            ) as resp:
+            async with self._session.post(endpoint, json=body, headers=headers) as resp:
                 if resp.status != 200:
                     text = await resp.text()
                     raise RuntimeError(f"Proxy API error {resp.status}: {text}")
                 
-                buffer = ""
-                async for raw_bytes in resp.content.iter_any():
-                    buffer += raw_bytes.decode("utf-8", errors="replace")
-                    
-                    lines = buffer.split("\n")
-                    buffer = lines.pop()
-                    
-                    for line in lines:
-                        if not line.startswith("data: "):
-                            continue
-                        data = line[6:].strip()
-                        
-                        if data == "[DONE]":
-                            return
-                        
-                        try:
-                            parsed = json.loads(data)
-                        except json.JSONDecodeError:
-                            continue
-                        
-                        usage = parsed.get("usage")
-                        if usage and usage.get("total_tokens"):
-                            yield StreamChunk(
-                                usage={
-                                    "input_tokens": usage.get("prompt_tokens", 0),
-                                    "output_tokens": usage.get("completion_tokens", 0),
-                                }
-                            )
-                        
-                        choices = parsed.get("choices", [])
-                        if not choices:
-                            continue
-                        
-                        choice = choices[0]
-                        delta = choice.get("delta", {})
-                        
-                        if delta.get("content"):
-                            yield StreamChunk(delta=delta["content"])
-                        
-                        tc_list = delta.get("tool_calls", [])
-                        for tc in tc_list:
-                            idx = tc.get("index", 0)
-                            fn = tc.get("function", {})
-                            yield StreamChunk(tool_call_delta={
-                                "index": idx,
-                                "id": tc.get("id", ""),
-                                "function": {
-                                    "name": fn.get("name", ""),
-                                    "arguments": fn.get("arguments", ""),
-                                },
-                            })
-                        
-                        finish = choice.get("finish_reason")
-                        if finish:
-                            reason = "stop" if finish == "stop" else (
-                                "tool_calls" if finish == "tool_calls" else finish
-                            )
-                            yield StreamChunk(finish_reason=reason)
+                async for chunk in self._stream_sse_response(resp):
+                    yield chunk
             
-            # Stream completed successfully (whether via [DONE] return or natural end)
             self.record_success()
         except Exception as e:
             self.record_failure(e)
@@ -377,19 +408,7 @@ class CopilotProxyProvider(ChatProvider):
         """Raw OpenAI SSE streaming."""
         await self.initialize()
         
-        # Build request body
-        body: dict = {
-            "model": self.model,
-            "stream": True,
-            "stream_options": {"include_usage": True},
-            "messages": [m.to_dict() for m in messages],
-        }
-        if max_tokens:
-            body["max_tokens"] = max_tokens
-        if temperature is not None:
-            body["temperature"] = temperature
-        if tools:
-            body["tools"] = tools
+        body = self._build_request_body(messages, tools, temperature, max_tokens)
         
         # Endpoint (Copilot doesn't use /v1 prefix)
         if "githubcopilot.com" in base_url or "localhost" in base_url:
@@ -403,76 +422,13 @@ class CopilotProxyProvider(ChatProvider):
             **COPILOT_HEADERS,
         }
         
-        async with self._session.post(
-            endpoint, json=body, headers=headers
-        ) as resp:
+        async with self._session.post(endpoint, json=body, headers=headers) as resp:
             if resp.status != 200:
                 text = await resp.text()
                 raise RuntimeError(f"OpenAI API error {resp.status}: {text}")
             
-            buffer = ""
-            async for raw_bytes in resp.content.iter_any():
-                buffer += raw_bytes.decode("utf-8", errors="replace")
-                
-                lines = buffer.split("\n")
-                buffer = lines.pop()  # Keep incomplete line
-                
-                for line in lines:
-                    if not line.startswith("data: "):
-                        continue
-                    data = line[6:].strip()
-                    
-                    if data == "[DONE]":
-                        return
-                    
-                    try:
-                        parsed = json.loads(data)
-                    except json.JSONDecodeError:
-                        continue
-                    
-                    # Usage chunk
-                    usage = parsed.get("usage")
-                    if usage and usage.get("total_tokens"):
-                        yield StreamChunk(
-                            usage={
-                                "input_tokens": usage.get("prompt_tokens", 0),
-                                "output_tokens": usage.get("completion_tokens", 0),
-                            }
-                        )
-                    
-                    choices = parsed.get("choices", [])
-                    if not choices:
-                        continue
-                    
-                    choice = choices[0]
-                    delta = choice.get("delta", {})
-                    
-                    # Text content
-                    if delta.get("content"):
-                        yield StreamChunk(delta=delta["content"])
-                    
-                    # Tool calls
-                    tc_list = delta.get("tool_calls", [])
-                    for tc in tc_list:
-                        idx = tc.get("index", 0)
-                        fn = tc.get("function", {})
-                        
-                        yield StreamChunk(tool_call_delta={
-                            "index": idx,
-                            "id": tc.get("id", ""),
-                            "function": {
-                                "name": fn.get("name", ""),
-                                "arguments": fn.get("arguments", ""),
-                            },
-                        })
-                    
-                    # Finish reason
-                    finish = choice.get("finish_reason")
-                    if finish:
-                        reason = "stop" if finish == "stop" else (
-                            "tool_calls" if finish == "tool_calls" else finish
-                        )
-                        yield StreamChunk(finish_reason=reason)
+            async for chunk in self._stream_sse_response(resp):
+                yield chunk
     
     # ── Health Check ──────────────────────────────────────────────
     

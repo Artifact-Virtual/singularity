@@ -60,11 +60,8 @@ def validate_path(path: str) -> str | None:
         return f"Path outside allowed directories: {resolved}"
     
     # Block sensitive paths even within allowed dirs
-    sensitive = [
-        ".ssh/", ".gnupg/", ".aws/", ".kube/",
-        "id_rsa", "id_ed25519", ".env",
-    ]
-    for s in sensitive:
+    _SENSITIVE_PARTS = (".ssh/", ".gnupg/", ".aws/", ".kube/", "id_rsa", "id_ed25519", ".env")
+    for s in _SENSITIVE_PARTS:
         if s in resolved and "workspace" not in resolved:
             return f"Sensitive path blocked: {resolved}"
     
