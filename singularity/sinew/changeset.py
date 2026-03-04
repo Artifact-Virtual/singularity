@@ -643,6 +643,6 @@ class ChangesetManager:
         for f in sorted(self.changeset_dir.glob("*.json"), reverse=True)[:limit]:
             try:
                 records.append(json.loads(f.read_text()))
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Suppressed: {e}")
         return records

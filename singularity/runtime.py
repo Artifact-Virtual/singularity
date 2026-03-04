@@ -113,6 +113,7 @@ class Runtime:
         self.coordinator = None  # CSUITE coordinator
         self.dispatcher = None   # CSUITE dispatch interface
         self.deployer = None     # NERVE guild deployer
+        self.nexus = None        # NEXUS self-optimization engine
         
         self._running = False
         self._boot_time: float | None = None
@@ -145,51 +146,55 @@ class Runtime:
         self._boot_time = time.monotonic()
         
         # Phase 0: Validate .core/ exists and is clean
-        logger.info("[0/11] Validating agent core...")
+        logger.info("[0/12] Validating agent core...")
         self._validate_core()
         
         # Phase 1: Event Bus
-        logger.info("[1/11] Starting event bus...")
+        logger.info("[1/12] Starting event bus...")
         await self.bus.start()
         
         # Phase 2: Memory (MEMORY)
-        logger.info("[2/11] Initializing memory (MEMORY)...")
+        logger.info("[2/12] Initializing memory (MEMORY)...")
         await self._boot_memory()
         
         # Phase 3: Tools (SINEW)
-        logger.info("[3/11] Initializing tools (SINEW)...")
+        logger.info("[3/12] Initializing tools (SINEW)...")
         await self._boot_sinew()
         
         # Phase 4: Voice (VOICE)
-        logger.info("[4/11] Initializing voice (VOICE)...")
+        logger.info("[4/12] Initializing voice (VOICE)...")
         await self._boot_voice()
         
         # Phase 5: Brain (CORTEX)
-        logger.info("[5/11] Initializing brain (CORTEX)...")
+        logger.info("[5/12] Initializing brain (CORTEX)...")
         await self._boot_cortex()
         
         # Phase 6: C-Suite (CSUITE) — requires VOICE + SINEW
-        logger.info("[6/11] Initializing C-Suite (CSUITE)...")
+        logger.info("[6/12] Initializing C-Suite (CSUITE)...")
         await self._boot_csuite()
         
-        # Phase 7: Scheduler (PULSE)
-        logger.info("[7/11] Initializing scheduler (PULSE)...")
+        # Phase 7: Self-Optimization (NEXUS)
+        logger.info("[7/12] Initializing self-optimization (NEXUS)...")
+        await self._boot_nexus()
+        
+        # Phase 8: Scheduler (PULSE)
+        logger.info("[8/12] Initializing scheduler (PULSE)...")
         await self._boot_pulse()
         
-        # Phase 8: Health + Immune
-        logger.info("[8/11] Initializing health monitoring (IMMUNE)...")
+        # Phase 9: Health + Immune
+        logger.info("[9/12] Initializing health monitoring (IMMUNE)...")
         await self._boot_immune()
         
-        # Phase 9: Channel routing (NERVE router)
-        logger.info("[9/11] Initializing message routing (NERVE)...")
+        # Phase 10: Channel routing (NERVE router)
+        logger.info("[10/12] Initializing message routing (NERVE)...")
         await self._boot_nerve_router()
         
-        # Phase 10: Guild deployer (NERVE deployer)
-        logger.info("[10/11] Preparing guild deployer (NERVE)...")
+        # Phase 11: Guild deployer (NERVE deployer)
+        logger.info("[11/12] Preparing guild deployer (NERVE)...")
         self._boot_deployer()
         
-        # Phase 11: Channel adapters (NERVE)
-        logger.info("[11/11] Connecting channels (NERVE)...")
+        # Phase 12: Channel adapters (NERVE)
+        logger.info("[12/12] Connecting channels (NERVE)...")
         await self._boot_nerve_adapters()
         
         # Wire cross-subsystem events
@@ -547,6 +552,30 @@ class Runtime:
         """Forward deployer events to the bus."""
         await self.bus.emit(f"deployer.{event}", data)
     
+    async def _boot_nexus(self) -> None:
+        """Initialize the NEXUS self-optimization engine."""
+        try:
+            from .nexus.engine import NexusEngine
+            
+            source_root = Path(__file__).resolve().parent  # singularity/singularity/
+            workspace = source_root.parent                  # singularity/
+            
+            self.nexus = NexusEngine(
+                source_root=str(source_root),
+                workspace=str(workspace),
+                bus=self.bus,
+            )
+            await self.nexus.start()
+            
+            # Make nexus available to tool executor
+            if self.tools:
+                self.tools.set_nexus(self.nexus)
+            
+            logger.info("  NEXUS self-optimization engine ready")
+        except Exception as e:
+            logger.warning(f"  NEXUS failed to initialize: {e}")
+            self.nexus = None
+    
     async def _boot_pulse(self) -> None:
         """Initialize scheduler."""
         from .pulse.scheduler import Scheduler, JobConfig, JobType
@@ -764,8 +793,8 @@ class Runtime:
             if adapter:
                 try:
                     await adapter.typing(envelope.source.chat_id)
-                except Exception:
-                    pass  # typing is best-effort, don't block processing
+                except Exception as e:
+                    logger.debug(f"Suppressed: {e}")
             
             # Process through cortex engine
             if self.cortex:

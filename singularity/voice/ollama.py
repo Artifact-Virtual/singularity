@@ -58,10 +58,25 @@ class OllamaProvider(ChatProvider):
         """Stream chat via Ollama /api/chat."""
         await self.initialize()
         
+        # Convert messages, then fix tool_call arguments for Ollama.
+        # to_dict() serializes arguments as JSON strings (OpenAI format),
+        # but Ollama expects them as native dicts.
+        raw_messages = [m.to_dict() for m in messages]
+        for msg in raw_messages:
+            if msg.get("tool_calls"):
+                for tc in msg["tool_calls"]:
+                    fn = tc.get("function", {})
+                    args = fn.get("arguments")
+                    if isinstance(args, str):
+                        try:
+                            fn["arguments"] = json.loads(args)
+                        except (json.JSONDecodeError, TypeError):
+                            fn["arguments"] = {}
+        
         body: dict = {
             "model": self.model,
             "stream": True,
-            "messages": [m.to_dict() for m in messages],
+            "messages": raw_messages,
             "options": {
                 "temperature": temperature,
                 "num_predict": max_tokens,

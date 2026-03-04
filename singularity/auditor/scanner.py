@@ -46,6 +46,9 @@ CODE_EXTENSIONS = {
 }
 
 
+import logging
+logger = logging.getLogger("singularity.auditor.scanner")
+
 @dataclass
 class GitInfo:
     """Git repository status."""
@@ -418,8 +421,8 @@ class WorkspaceScanner:
                 self._parse_cargo(project, os.path.join(directory, "Cargo.toml"))
             elif "go.mod" in entries:
                 self._parse_gomod(project, os.path.join(directory, "go.mod"))
-        except Exception:
-            pass  # Metadata parsing is best-effort
+        except Exception as e:
+            logger.debug(f"Suppressed: {e}")
     
     def _parse_pyproject(self, project: ProjectInfo, path: str) -> None:
         """Parse pyproject.toml for metadata."""
@@ -563,8 +566,8 @@ class WorkspaceScanner:
                 commit_dt = datetime.fromisoformat(info.last_commit_date.replace("Z", "+00:00"))
                 delta = datetime.now(timezone.utc) - commit_dt
                 info.stale_days = delta.days
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Suppressed: {e}")
         
         return info
     
@@ -578,8 +581,8 @@ class WorkspaceScanner:
             ci.github_actions = True
             try:
                 ci.workflows = [f for f in os.listdir(gh_dir) if f.endswith((".yml", ".yaml"))]
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Suppressed: {e}")
         
         # GitLab CI
         ci.gitlab_ci = ".gitlab-ci.yml" in entries
@@ -640,8 +643,8 @@ class WorkspaceScanner:
                     port = int(match.group(1))
                     if port < 65536:
                         self._listening_ports.add(port)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Suppressed: {e}")
     
     def _scan_running_processes(self) -> None:
         """Scan running processes for known service patterns."""
@@ -657,8 +660,8 @@ class WorkspaceScanner:
                     for keyword in ("node", "python", "java", "go", "ruby", "nginx", "redis", "postgres", "mongo", "uvicorn", "gunicorn", "flask", "django", "fastapi"):
                         if keyword in cmd.lower():
                             self._running_procs.setdefault(keyword, []).append(cmd[:200])
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Suppressed: {e}")
     
     def _check_live_status(self, project: ProjectInfo) -> None:
         """Check if a project has live running processes or listening ports."""
@@ -688,8 +691,8 @@ class WorkspaceScanner:
                     line = line.strip()
                     if line and not line.startswith("#"):
                         patterns.append(line)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Suppressed: {e}")
         return patterns
 
 
@@ -727,8 +730,8 @@ class InfraInfo:
             free = st.f_bavail * st.f_frsize
             infra.disk_used_pct = (1 - free / total) * 100
             infra.disk_free_gb = free / (1024**3)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Suppressed: {e}")
         try:
             with open("/proc/meminfo") as f:
                 info = {}
@@ -739,16 +742,16 @@ class InfraInfo:
                 total = info.get("MemTotal", 1)
                 avail = info.get("MemAvailable", 0)
                 infra.memory_used_pct = (1 - avail / total) * 100
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Suppressed: {e}")
         try:
             r = subprocess.run(["ss", "-tlnp"], capture_output=True, text=True, timeout=5)
             for line in r.stdout.strip().split("\n")[1:]:
                 parts = line.split()
                 if len(parts) >= 4:
                     infra.listening_ports.append({"address": parts[3]})
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Suppressed: {e}")
         try:
             r = subprocess.run(
                 ["systemctl", "list-units", "--type=service", "--state=active", "--no-legend", "--no-pager"],
@@ -757,13 +760,13 @@ class InfraInfo:
             for line in r.stdout.strip().split("\n"):
                 if line.strip():
                     infra.active_services.append(line.split()[0])
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Suppressed: {e}")
         try:
             r = subprocess.run(["crontab", "-l"], capture_output=True, text=True, timeout=5)
             infra.cron_jobs = [l for l in r.stdout.strip().split("\n") if l.strip() and not l.startswith("#")]
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Suppressed: {e}")
         return infra
 
 

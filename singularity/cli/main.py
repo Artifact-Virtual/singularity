@@ -695,8 +695,8 @@ def cmd_poa(args):
 
                 snap = tracker.snapshot()
                 print(f"  ❤️ Immune: {snap['bar']}")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Suppressed: {e}")
         else:
             warn("Not approved. Run with --approve to create.")
     
@@ -1009,8 +1009,8 @@ def cmd_deploy(args):
                     bot_id = data.get("discord", {}).get("bot_id", "")
                     if bot_id:
                         break
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Suppressed: {e}")
 
         # Try .env
         if not bot_id:
@@ -1073,8 +1073,8 @@ def cmd_changeset(args):
             for cs in pending:
                 risk = cs._risk_breakdown()
                 risk_str = ""
-                if risk["critical"]: risk_str += f" {fmt.BR_RED}{risk['critical']} critical{fmt.RESET}"
-                if risk["high"]: risk_str += f" {fmt.BR_YELLOW}{risk['high']} high{fmt.RESET}"
+# Consider: parts.append(x) then ''.join(parts)
+# Consider: parts.append(x) then ''.join(parts)
                 mut_count = len(cs.mutations)
                 print(f"    📋 {cs.id}  [{cs.agent_role}]  {mut_count} changes{risk_str}")
                 print(f"       {fmt.DIM}{cs.task[:70]}{fmt.RESET}")
@@ -1317,8 +1317,8 @@ def _quick_scan(workspace: str) -> dict:
         for line in result.stdout.strip().split("\n"):
             if any(kw in line.lower() for kw in ["api", "app", "web", "gateway", "cloud"]):
                 live_products += 1
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Suppressed: {e}")
     
     return {
         "workspace": str(workspace),

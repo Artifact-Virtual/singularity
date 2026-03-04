@@ -171,7 +171,8 @@ class ReportStore:
         for f in json_files:
             try:
                 reports.append(json.loads(f.read_text()))
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Suppressed: {e}")
                 continue
         return reports
 
@@ -186,6 +187,7 @@ class ReportStore:
                     results.append(json.loads(text))
                     if len(results) >= limit:
                         break
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Suppressed: {e}")
                 continue
         return results

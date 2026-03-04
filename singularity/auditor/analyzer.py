@@ -23,6 +23,9 @@ from typing import Optional
 from .scanner import ProjectInfo
 
 
+import logging
+logger = logging.getLogger("singularity.auditor.analyzer")
+
 @dataclass
 class MaturityScore:
     """Maturity assessment for a single project."""
@@ -408,8 +411,8 @@ class WorkspaceAnalyzer:
                 try:
                     content = open(gitignore_path).read()
                     env_ignored = ".env" in content
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Suppressed: {e}")
             if not env_ignored and p.git.is_repo:
                 risks.append(Risk(
                     category="secrets", severity="critical",

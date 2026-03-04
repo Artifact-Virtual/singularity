@@ -13,6 +13,9 @@ import time
 from dataclasses import dataclass, field
 
 
+import logging
+logger = logging.getLogger("singularity.immune.vitals")
+
 @dataclass
 class SystemVitals:
     """Point-in-time system resource snapshot."""
@@ -36,8 +39,8 @@ def collect_vitals() -> SystemVitals:
         if total > 0:
             vitals.disk_used_pct = (1 - free / total) * 100
             vitals.disk_free_gb = free / (1024**3)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Suppressed: {e}")
 
     try:
         with open("/proc/meminfo") as f:
@@ -52,19 +55,19 @@ def collect_vitals() -> SystemVitals:
             available = meminfo.get("MemAvailable", 0)
             vitals.memory_used_pct = (1 - available / total) * 100
             vitals.memory_available_mb = available / 1024
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Suppressed: {e}")
 
     try:
         vitals.load_average_1m = os.getloadavg()[0]
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Suppressed: {e}")
 
     try:
         with open("/proc/uptime") as f:
             vitals.uptime_seconds = float(f.read().split()[0])
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Suppressed: {e}")
 
     vitals.timestamp = time.time()
     return vitals

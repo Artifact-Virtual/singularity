@@ -61,6 +61,7 @@ class ToolExecutor:
         self._background_procs: dict[str, asyncio.subprocess.Process] = {}
         self._discord_adapter: Any = None  # Set by runtime after boot
         self._csuite_dispatcher: Any = None  # Set by runtime after C-Suite boot
+        self._nexus: Any = None  # Set by runtime after NEXUS boot
         self._comb: Any = None  # Set by runtime after memory boot
         self._hektor: Any = None  # Lazy-initialized HektorMemory instance
         self._current_sender_id: str | None = None  # For @mention enforcement
@@ -76,6 +77,10 @@ class ToolExecutor:
     def set_comb(self, comb: Any) -> None:
         """Wire the COMB memory instance (shared with runtime, avoids re-init per call)."""
         self._comb = comb
+    
+    def set_nexus(self, nexus: Any) -> None:
+        """Wire the NEXUS self-optimization engine."""
+        self._nexus = nexus
     
     def set_current_sender(self, sender_id: str | None) -> None:
         """Set the current message sender for @mention enforcement."""
@@ -129,8 +134,8 @@ class ToolExecutor:
         for pid, proc in self._background_procs.items():
             try:
                 proc.terminate()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Suppressed: {e}")
         self._background_procs.clear()
     
     # ── Tool implementations ─────────────────────────────────────────
@@ -315,8 +320,8 @@ class ToolExecutor:
                             text = re.sub(r'<style[^>]*>.*?</style>', '', text, flags=re.DOTALL)
                             text = re.sub(r'<[^>]+>', ' ', text)
                             text = re.sub(r'\s+', ' ', text).strip()
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug(f"Suppressed: {e}")
                     
                     if len(text) > max_chars:
                         text = text[:max_chars] + f"\n\n[Truncated at {max_chars} chars]"
@@ -602,3 +607,148 @@ class ToolExecutor:
             logger.info(f"Dispatch summary forwarded to #dispatch channel")
         except Exception as e:
             logger.error(f"Failed to forward dispatch summary to Discord: {e}")
+
+    # ── NEXUS Tools ──────────────────────────────────────────
+
+    async def _tool_nexus_audit(self, args: dict) -> str:
+        """Run NEXUS self-optimization audit on Singularity's own codebase."""
+        if not self._nexus:
+            return "Error: NEXUS engine not initialized."
+        
+        target = args.get("target")  # Optional: specific file or subdirectory
+        mode = args.get("mode", "audit")  # audit, propose, optimize, report
+        
+        try:
+            result = await self._nexus.run(mode=mode, target=target)
+            
+            lines = [result.summary()]
+            
+            # Include top findings for audit/report modes
+            if mode in ("audit", "report") and result.report.findings:
+                lines.append("")
+                lines.append("── Top Findings ──")
+                shown = 0
+                for f in result.report.findings:
+                    if f.severity in ("critical", "issue"):
+                        lines.append(str(f))
+                        shown += 1
+                        if shown >= 15:
+                            remaining = sum(1 for x in result.report.findings 
+                                          if x.severity in ("critical", "issue")) - shown
+                            if remaining > 0:
+                                lines.append(f"  ... and {remaining} more issues")
+                            break
+            
+            # Include proposals for propose/optimize modes
+            if mode in ("propose", "optimize") and result.proposals:
+                lines.append("")
+                lines.append("── Proposals ──")
+                for p in result.proposals[:10]:
+                    lines.append(str(p))
+                if len(result.proposals) > 10:
+                    lines.append(f"  ... and {len(result.proposals) - 10} more proposals")
+            
+            return "\n".join(lines)
+        except Exception as e:
+            return f"NEXUS audit error: {e}"
+
+    async def _tool_nexus_status(self, args: dict) -> str:
+        """Get current NEXUS engine status including active swaps."""
+        if not self._nexus:
+            return "Error: NEXUS engine not initialized."
+        
+        try:
+            status = self._nexus.get_status()
+            active = self._nexus.get_active_swaps()
+            
+            lines = [
+                "═══ NEXUS Status ═══",
+                f"Started: {status['started']}",
+                f"Optimization runs: {status['run_count']}",
+                f"Active swaps: {status['active_swaps']}",
+                f"Journal entries: {status['journal_entries']}",
+                f"Source root: {status['source_root']}",
+            ]
+            
+            if active:
+                lines.append("")
+                lines.append("── Active Swaps ──")
+                for swap in active:
+                    lines.append(
+                        f"  [{swap.swap_id}] {swap.module_name}."
+                        f"{(swap.class_name + '.') if swap.class_name else ''}"
+                        f"{swap.function_name} — {swap.reason}"
+                    )
+            
+            return "\n".join(lines)
+        except Exception as e:
+            return f"NEXUS status error: {e}"
+
+    async def _tool_nexus_swap(self, args: dict) -> str:
+        """Hot-swap a function at runtime via NEXUS."""
+        if not self._nexus:
+            return "Error: NEXUS engine not initialized."
+        
+        module_name = args.get("module_name", "")
+        function_name = args.get("function_name", "")
+        new_source = args.get("new_source", "")
+        reason = args.get("reason", "Manual hot-swap")
+        class_name = args.get("class_name")
+        
+        if not all([module_name, function_name, new_source]):
+            return "Error: module_name, function_name, and new_source are required."
+        
+        try:
+            swap_id = await self._nexus.hotswap.swap(
+                module_name=module_name,
+                function_name=function_name,
+                new_source=new_source,
+                reason=reason,
+                class_name=class_name,
+                validate=False,  # Manual swaps — caller is responsible
+            )
+            return f"✅ Swap successful: {swap_id}\nTarget: {module_name}.{(class_name + '.') if class_name else ''}{function_name}\nReason: {reason}"
+        except (ValueError, RuntimeError) as e:
+            return f"❌ Swap failed: {e}"
+
+    async def _tool_nexus_rollback(self, args: dict) -> str:
+        """Rollback a NEXUS hot-swap by swap ID, or rollback all."""
+        if not self._nexus:
+            return "Error: NEXUS engine not initialized."
+        
+        swap_id = args.get("swap_id")
+        rollback_all = args.get("all", False)
+        
+        try:
+            if rollback_all:
+                count = await self._nexus.rollback_all()
+                return f"✅ Rolled back {count} active swap(s)."
+            elif swap_id:
+                success = await self._nexus.rollback(swap_id)
+                if success:
+                    return f"✅ Rolled back {swap_id}"
+                else:
+                    return f"❌ Rollback failed — swap_id {swap_id} not found or already rolled back"
+            else:
+                return "Error: provide swap_id or set all=true"
+        except Exception as e:
+            return f"Rollback error: {e}"
+
+    async def _tool_nexus_evolve(self, args: dict) -> str:
+        """Run NEXUS self-evolution cycle — find safe transformations, validate, and apply."""
+        if not self._nexus:
+            return "Error: NEXUS engine not initialized."
+        
+        target = args.get("target")
+        dry_run = args.get("dry_run", True)  # Default to dry run for safety
+        max_evolutions = args.get("max_evolutions", 50)
+        
+        try:
+            report = await self._nexus.evolve(
+                target=target,
+                dry_run=dry_run,
+                max_evolutions=max_evolutions,
+            )
+            return report.summary()
+        except Exception as e:
+            return f"NEXUS evolution error: {e}"

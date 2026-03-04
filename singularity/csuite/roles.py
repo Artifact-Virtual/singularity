@@ -589,7 +589,7 @@ _ROLE_DEFAULTS: dict[str, dict] = {
             "project_status", "documentation_coverage", "sop_compliance",
             "milestone_tracking",
         ],
-        "timeout": 180,
+        "timeout": 300,
     },
     "cfo": {
         "emoji": "💰",
@@ -604,7 +604,7 @@ _ROLE_DEFAULTS: dict[str, dict] = {
             "cloud_costs", "billing_status", "revenue_tracking",
         ],
         "can_network": True,
-        "timeout": 180,
+        "timeout": 300,
     },
     "ciso": {
         "emoji": "🛡️",

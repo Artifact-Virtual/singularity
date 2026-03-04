@@ -69,7 +69,7 @@ class CopilotProxyProvider(ChatProvider):
         """Create HTTP session."""
         if not self._session or self._session.closed:
             self._session = aiohttp.ClientSession(
-                timeout=aiohttp.ClientTimeout(total=120)
+                timeout=aiohttp.ClientTimeout(total=300)
             )
     
     async def shutdown(self) -> None:
@@ -108,8 +108,8 @@ class CopilotProxyProvider(ChatProvider):
                     oauth = hosts[key].get("oauth_token")
                     if oauth:
                         return oauth
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Suppressed: {e}")
         
         # 5. gh CLI
         try:
@@ -119,8 +119,8 @@ class CopilotProxyProvider(ChatProvider):
             )
             if result.returncode == 0 and result.stdout.strip():
                 return result.stdout.strip()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Suppressed: {e}")
         
         raise RuntimeError(
             "No GitHub token found for Copilot. "
@@ -139,8 +139,8 @@ class CopilotProxyProvider(ChatProvider):
                     expires_at = data.get("expires_at") or data.get("expiresAt")
                     if token and expires_at:
                         return {"token": token, "expires_at": expires_at}
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Suppressed: {e}")
         return None
     
     def _save_cached_token(self, token_data: dict) -> None:
@@ -148,8 +148,8 @@ class CopilotProxyProvider(ChatProvider):
         try:
             TOKEN_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
             TOKEN_CACHE_PATH.write_text(json.dumps(token_data, indent=2))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Suppressed: {e}")
     
     def _is_token_usable(self, token_data: dict) -> bool:
         """Check if token has >5 min remaining."""

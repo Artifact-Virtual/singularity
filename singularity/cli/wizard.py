@@ -64,6 +64,9 @@ INDUSTRY_PRESETS: dict[str, dict[str, Any]] = {
 
 # ── Helpers ───────────────────────────────────────────────────────
 
+import logging
+logger = logging.getLogger("singularity.cli.wizard")
+
 def _prompt(
     label: str,
     default: str = "",
@@ -174,8 +177,8 @@ def _fetch_bot_guilds(token: str) -> list[dict[str, Any]]:
     except urllib.error.HTTPError as e:
         # 401 = bad token, 403 = missing scope — both mean we can't fetch
         pass
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Suppressed: {e}")
 
     return []
 
@@ -232,8 +235,8 @@ def _parse_env_file(path: Path) -> dict[str, str]:
                 key = key.strip()
                 value = value.strip().strip("\"'")
                 result[key] = value
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Suppressed: {e}")
     return result
 
 

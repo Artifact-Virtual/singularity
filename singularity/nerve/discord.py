@@ -487,8 +487,8 @@ class DiscordAdapter(BaseAdapter):
                 try:
                     ref_msg = await channel.fetch_message(int(message.reply_to_id))
                     send_kwargs["reference"] = ref_msg
-                except Exception:
-                    pass  # Reply target may be deleted
+                except Exception as e:
+                    logger.debug(f"Suppressed: {e}")
 
             # Media on last chunk
             if is_last and message.media:
@@ -534,8 +534,8 @@ class DiscordAdapter(BaseAdapter):
             if channel and hasattr(channel, "send"):
                 self._channel_cache[int_id] = channel
                 return channel
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Suppressed: {e}")
         return None
 
     # ── Platform Actions ─────────────────────────────────────────────
@@ -581,8 +581,8 @@ class DiscordAdapter(BaseAdapter):
             return
         try:
             await channel.typing()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Suppressed: {e}")
 
     # ── Helpers ──────────────────────────────────────────────────────
 

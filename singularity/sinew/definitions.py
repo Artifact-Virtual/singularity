@@ -242,6 +242,115 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "nexus_audit",
+            "description": "Run NEXUS self-optimization audit on Singularity's own codebase. Scans for code quality issues, complexity, and improvement opportunities.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "target": {
+                        "type": "string",
+                        "description": "Specific file or subdirectory to scan (relative to source root). Leave empty for full scan.",
+                    },
+                    "mode": {
+                        "type": "string",
+                        "enum": ["audit", "propose", "optimize", "report"],
+                        "description": "Audit mode. 'audit' = scan only. 'propose' = scan + generate proposals. 'optimize' = scan + propose + auto-apply HIGH confidence. 'report' = full report. Default: audit",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "nexus_status",
+            "description": "Get current NEXUS engine status including active hot-swaps, run count, and journal entries.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "nexus_swap",
+            "description": "Hot-swap a specific function at runtime via NEXUS. Replaces a live function with new source code, with rollback capability.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "module_name": {
+                        "type": "string",
+                        "description": "Python module name (e.g. 'singularity.cortex.agent')",
+                    },
+                    "function_name": {
+                        "type": "string",
+                        "description": "Function name to replace",
+                    },
+                    "new_source": {
+                        "type": "string",
+                        "description": "New function source code",
+                    },
+                    "reason": {
+                        "type": "string",
+                        "description": "Reason for the swap",
+                    },
+                    "class_name": {
+                        "type": "string",
+                        "description": "Class name if swapping a method (optional)",
+                    },
+                },
+                "required": ["module_name", "function_name", "new_source", "reason"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "nexus_rollback",
+            "description": "Rollback a NEXUS hot-swap. Pass a specific swap_id to rollback one swap, or 'all' to rollback everything.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "swap_id": {
+                        "type": "string",
+                        "description": "Swap ID to rollback, or 'all' for full rollback",
+                    },
+                },
+                "required": ["swap_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "nexus_evolve",
+            "description": "Run NEXUS self-evolution cycle. Scans for safe mechanical code transformations (silent exceptions, bare excepts, etc.), validates them via AST, and applies them with hot-swap + disk persistence.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "target": {
+                        "type": "string",
+                        "description": "Specific file or subdirectory to evolve (relative to source root). Leave empty for full scan.",
+                    },
+                    "dry_run": {
+                        "type": "boolean",
+                        "description": "If true, find and validate but don't apply. Default: true (safe mode)",
+                    },
+                    "max_evolutions": {
+                        "type": "number",
+                        "description": "Maximum number of evolutions to apply. Default: 50",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "csuite_dispatch",
             "description": "Dispatch a task to C-Suite executives (CTO, COO, CFO, CISO). Routes through the native Coordinator — no webhooks, direct execution.",
             "parameters": {

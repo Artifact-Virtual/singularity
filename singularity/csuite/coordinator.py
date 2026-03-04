@@ -119,6 +119,10 @@ class Coordinator:
         self._running = False
         self._webhook_reporter = WebhookReporter()
 
+        # Self-healing engine
+        from .self_heal import SelfHealEngine
+        self._self_heal = SelfHealEngine(self, bus, workspace)
+
         # Wire up bus listeners
         async def _on_dispatch(event):
             await self._handle_dispatch_event(event.data)
@@ -147,12 +151,16 @@ class Coordinator:
             logger.warning("Webhook reporter not ready — reports will not post to Discord")
 
         asyncio.create_task(self._queue_processor())
+
+        # Start self-healing engine
+        await self._self_heal.start()
         asyncio.create_task(self._standing_order_loop())
         logger.info("⚡ Coordinator started")
 
     async def stop(self) -> None:
         """Stop the coordinator."""
         self._running = False
+        await self._self_heal.stop()
         logger.info("⚡ Coordinator stopped")
 
     # ── Public API ──

@@ -65,8 +65,8 @@ class ProviderChain:
         for provider in self.providers:
             try:
                 await provider.shutdown()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Suppressed: {e}")
     
     async def chat(
         self,
