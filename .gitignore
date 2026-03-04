@@ -96,3 +96,4 @@ aria/csuite/roles_v1.py
 .core/secrets/
 .core/operations/comb-flush-security-audit.md
 .core/operations/comb-security-audit.md
+.core/install.json
