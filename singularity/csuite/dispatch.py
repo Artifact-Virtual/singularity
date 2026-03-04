@@ -21,15 +21,17 @@ integrations that still need them.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional, TYPE_CHECKING
 
 from .roles import RoleType
 from .coordinator import Coordinator, DispatchResult
-from .executive import Task, TaskResult
+from .executive import Task, TaskResult, TaskStatus
 
 if TYPE_CHECKING:
     pass
@@ -150,7 +152,7 @@ class Dispatcher:
         priority: str = "normal",
         deadline: Optional[str] = None,
         context: Optional[dict[str, Any]] = None,
-        max_iterations: int = 25,
+        max_iterations: int = 8,
     ) -> DispatchResult:
         """
         Dispatch a task with auto-routing.
@@ -175,7 +177,7 @@ class Dispatcher:
         priority: str = "normal",
         deadline: Optional[str] = None,
         context: Optional[dict[str, Any]] = None,
-        max_iterations: int = 25,
+        max_iterations: int = 8,
     ) -> DispatchResult:
         """Dispatch a task to a specific executive."""
         result = await self.coordinator.dispatch(
@@ -196,7 +198,7 @@ class Dispatcher:
         priority: str = "normal",
         deadline: Optional[str] = None,
         context: Optional[dict[str, Any]] = None,
-        max_iterations: int = 25,
+        max_iterations: int = 8,
     ) -> DispatchResult:
         """Dispatch a task to all executives in parallel."""
         result = await self.coordinator.dispatch(
@@ -210,6 +212,122 @@ class Dispatcher:
         )
         self._log_dispatch("all", description, priority, result)
         return result
+
+    async def dispatch_batch(
+        self,
+        tasks: list[tuple[str, str]],
+        priority: str = "normal",
+        deadline: Optional[str] = None,
+        context: Optional[dict[str, Any]] = None,
+        max_iterations: int = 8,
+    ) -> DispatchResult:
+        """
+        Batch-dispatch multiple tasks, grouped by executive.
+        
+        Instead of spawning a separate LLM session per task, this groups
+        tasks by their target executive and combines them into a single
+        prompt per exec. Dramatically reduces API overhead for audits.
+        
+        Args:
+            tasks: List of (target, description) tuples.
+                   target can be "auto", "all", or a specific role name.
+            priority: Priority for all tasks in the batch.
+            deadline: Optional deadline string.
+            context: Optional shared context dict.
+            max_iterations: Max iterations per executive session.
+        
+        Returns:
+            A single DispatchResult containing all task results.
+        
+        Example:
+            await dispatcher.dispatch_batch([
+                ("cto", "Review HEKTOR architecture"),
+                ("cto", "Check CI pipeline status"),
+                ("cfo", "Q1 revenue projection"),
+                ("cfo", "Budget variance analysis"),
+            ])
+            # → 2 LLM sessions (1 CTO, 1 CFO) instead of 4
+        """
+        from collections import defaultdict
+        
+        # Group tasks by resolved target executive
+        grouped: dict[str, list[str]] = defaultdict(list)
+        
+        for target, description in tasks:
+            target_lower = target.lower().strip()
+            if target_lower in ("auto", "all"):
+                # For auto/all, resolve each task individually and group by result
+                resolved = self.coordinator._resolve_targets(description, target_lower)
+                for role_type in resolved:
+                    grouped[role_type.value].append(description)
+            else:
+                grouped[target_lower].append(description)
+        
+        if not grouped:
+            logger.warning("dispatch_batch: no tasks resolved to any executive")
+            return DispatchResult(dispatch_id="batch-empty")
+        
+        # Build a combined prompt per executive and dispatch
+        import uuid as _uuid
+        batch_id = str(_uuid.uuid4())[:8]
+        combined_result = DispatchResult(dispatch_id=f"batch-{batch_id}")
+        
+        # Run all executive batches in parallel
+        async def _run_batched(role_name: str, descriptions: list[str]) -> Optional[TaskResult]:
+            combined_desc = (
+                f"**BATCH DISPATCH** — {len(descriptions)} task(s). "
+                f"Complete each one and report results for all.\n\n"
+            )
+            for i, desc in enumerate(descriptions, 1):
+                combined_desc += f"### Task {i}\n{desc}\n\n"
+            
+            try:
+                result = await self.coordinator.dispatch(
+                    description=combined_desc,
+                    target=role_name,
+                    priority=priority,
+                    deadline=deadline,
+                    context=context,
+                    max_iterations=max_iterations,
+                    requester="ava-batch",
+                )
+                return result.tasks[0] if result.tasks else None
+            except Exception as e:
+                logger.error(f"Batch dispatch to {role_name} failed: {e}")
+                return TaskResult(
+                    task_id=f"batch-{role_name}",
+                    role=RoleType(role_name) if role_name in [r.value for r in RoleType] else RoleType.CTO,
+                    status=TaskStatus.FAILED,
+                    error=str(e),
+                )
+        
+        from .executive import TaskResult, TaskStatus
+        
+        coros = [_run_batched(role, descs) for role, descs in grouped.items()]
+        results = await asyncio.gather(*coros, return_exceptions=True)
+        
+        for r in results:
+            if isinstance(r, Exception):
+                logger.error(f"Batch task exception: {r}")
+                combined_result.escalations.append({"error": str(r)})
+            elif r is not None:
+                combined_result.tasks.append(r)
+        
+        combined_result.completed_at = time.time()
+        
+        self._log_dispatch(
+            f"batch({len(tasks)}→{len(grouped)} sessions)",
+            f"Batch: {len(tasks)} tasks across {len(grouped)} executives",
+            priority,
+            combined_result,
+        )
+        
+        logger.info(
+            f"⚡ Batch dispatch complete: {len(tasks)} tasks → "
+            f"{len(grouped)} exec sessions, {combined_result.duration:.1f}s"
+        )
+        
+        return combined_result
 
     def status(self) -> dict[str, Any]:
         """Get full C-Suite status snapshot."""

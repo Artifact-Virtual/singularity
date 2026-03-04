@@ -98,7 +98,7 @@ class Task:
     deadline: Optional[str] = None
     requester: str = "singularity"       # who dispatched this
     context: dict[str, Any] = field(default_factory=dict)
-    max_iterations: int = 25
+    max_iterations: int = 8
     timestamp: float = field(default_factory=time.time)
 
 
@@ -201,13 +201,26 @@ class Executive:
             # Agent loop — think/act/observe
             for i in range(task.max_iterations):
                 iterations = i + 1
+                is_last_iteration = (iterations >= task.max_iterations)
 
                 # Get LLM response
+                # On last iteration, remove tools to force a final text summary
                 try:
-                    llm_response = await self.provider_chain.chat(
-                        messages=messages,
-                        tools=self._get_scoped_tool_definitions(),
-                    )
+                    if is_last_iteration:
+                        # Force final response — no tools available
+                        messages.append(ChatMessage(
+                            role="user",
+                            content="You've reached the iteration limit. Summarize your findings and provide your final response NOW. Do NOT make any more tool calls.",
+                        ))
+                        llm_response = await self.provider_chain.chat(
+                            messages=messages,
+                            tools=[],  # No tools — must produce text
+                        )
+                    else:
+                        llm_response = await self.provider_chain.chat(
+                            messages=messages,
+                            tools=self._get_scoped_tool_definitions(),
+                        )
                 except Exception as e:
                     llm_error = str(e)
                     logger.error(f"{self.name} LLM call failed iteration {iterations}: {e}")

@@ -418,10 +418,34 @@ class Runtime:
         from .csuite.executive import Executive
         from .csuite.coordinator import Coordinator
         from .csuite.dispatch import Dispatcher
+        from .voice.chain import ProviderChain
+        from .voice.proxy import CopilotProxyProvider
+        from .voice.ollama import OllamaProvider
         
         if not self.config.csuite.enabled:
             logger.info("  CSUITE disabled in config")
             return
+        
+        # Build exec-tier provider chain (lighter model for executives)
+        vc = self.config.voice
+        exec_model = self.config.csuite.executive_model
+        exec_providers = []
+        
+        exec_proxy = CopilotProxyProvider(
+            endpoint=vc.proxy.base_url,
+            model=exec_model,
+        )
+        exec_providers.append(exec_proxy)
+        
+        if vc.ollama.enabled:
+            exec_ollama = OllamaProvider(
+                endpoint=vc.ollama.base_url,
+                model=vc.ollama.models[0] if vc.ollama.models else "llama3.2",
+            )
+            exec_providers.append(exec_ollama)
+        
+        exec_voice = ProviderChain(exec_providers)
+        logger.info(f"  CSUITE exec-tier voice ready (model: {exec_model}, {len(exec_providers)} providers)")
         
         # Build role registry from config personas
         enterprise = "Artifact Virtual"
@@ -503,11 +527,11 @@ class Runtime:
                 Path(self.workspace) / "executives" / role_id
             )
             
-            # Create the executive
+            # Create the executive (uses exec-tier voice, not coordinator's Opus)
             executive = Executive(
                 role=role,
                 bus=self.bus,
-                provider_chain=self.voice,
+                provider_chain=exec_voice,
                 tool_executor=self.tools,
                 workspace=exec_workspace,
             )
@@ -618,9 +642,12 @@ class Runtime:
         
         total_poas = 0
         total_jobs = 0
+        primary_manager = None
         
         for workspace in poa_dirs:
             manager = POAManager(workspace)
+            if primary_manager is None:
+                primary_manager = manager
             active = manager.list_active()
             total_poas += len(active)
             
@@ -681,15 +708,67 @@ class Runtime:
                             ],
                         })
                         logger.warning(f"POA ALERT: {cfg.product_name} is RED ({report.criticals} critical)")
+                    elif report.overall_status == "yellow":
+                        await self.bus.emit("poa.alert", {
+                            "product_id": product_id,
+                            "product_name": cfg.product_name,
+                            "status": "yellow",
+                            "criticals": 0,
+                            "failed_checks": [
+                                c.to_dict() for c in report.checks if not c.passed
+                            ],
+                        })
+                        logger.info(f"POA WARNING: {cfg.product_name} is YELLOW ({report.failed} failed)")
                     else:
                         logger.info(f"POA audit: {cfg.product_name} → {report.overall_status.upper()}")
                         
                 except Exception as e:
                     logger.error(f"POA audit failed for {product_id}: {e}")
         
+        # Wire POA alert → Discord escalation
+        @self.bus.on("poa.alert")
+        async def on_poa_alert(event):
+            """Forward POA RED/YELLOW alerts to Discord for immediate visibility."""
+            try:
+                product_name = event.data.get("product_name", "unknown")
+                product_id = event.data.get("product_id", "")
+                status = event.data.get("status", "red")
+                criticals = event.data.get("criticals", 0)
+                failed_checks = event.data.get("failed_checks", [])
+
+                icon = "🔴" if status == "red" else "🟡"
+                severity_word = "CRITICAL" if status == "red" else "WARNING"
+
+                lines = [
+                    f"{icon} **POA {severity_word}: {product_name}** — {len(failed_checks)} failure(s)",
+                    "",
+                ]
+                for check in failed_checks[:5]:
+                    sev_icon = "🔴" if check.get("severity") == "critical" else "⚠️"
+                    lines.append(f"  {sev_icon} **{check.get('name', '?')}**: {check.get('message', '')}")
+                if len(failed_checks) > 5:
+                    lines.append(f"  ... and {len(failed_checks) - 5} more failures")
+
+                alert_msg = "\n".join(lines)
+
+                # Send to #dispatch channel for visibility
+                if self.tools and self.tools._discord_adapter:
+                    from .nerve.types import OutboundMessage
+                    dispatch_channel = "1478716096667189292"
+                    await self.tools._discord_adapter.send(
+                        dispatch_channel, OutboundMessage(content=alert_msg)
+                    )
+                    logger.info(f"POA alert for {product_name} forwarded to Discord")
+            except Exception as e:
+                logger.error(f"Failed to forward POA alert to Discord: {e}")
+
         # Also run first audit immediately for all active POAs
         if total_poas > 0:
             asyncio.create_task(self._run_initial_poa_audits(poa_dirs))
+        
+        # Wire POA manager to executor for tool access
+        if primary_manager and self.tools:
+            self.tools.set_poa_manager(primary_manager)
         
         logger.info(f"  POA ready ({total_poas} products, {total_jobs} audit jobs scheduled)")
     
@@ -1086,6 +1165,7 @@ class Runtime:
                         target = request.get("target", "auto")
                         description = request.get("description", "")
                         priority = request.get("priority", "normal")
+                        max_iterations = request.get("max_iterations", 8)
                         
                         if not description:
                             logger.warning(f"Inbox: empty description in {request_file.name}, skipping")
@@ -1101,14 +1181,17 @@ class Runtime:
                         if target == "all":
                             result = await self.dispatcher.dispatch_all(
                                 description=description, priority=priority,
+                                max_iterations=max_iterations,
                             )
                         elif target == "auto":
                             result = await self.dispatcher.dispatch(
                                 description=description, priority=priority,
+                                max_iterations=max_iterations,
                             )
                         else:
                             result = await self.dispatcher.dispatch_to(
                                 target=target, description=description, priority=priority,
+                                max_iterations=max_iterations,
                             )
                         
                         # Write result

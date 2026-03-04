@@ -102,6 +102,7 @@ class SelfHealEngine:
     MAX_ITERATION_EXPANSION = 50       # max we'll expand to
     FAILURE_WINDOW = 300               # 5 min window for failure rate tracking
     CIRCUIT_BREAKER_THRESHOLD = 5      # failures in window → circuit open
+    REROUTE_COOLDOWN = 120             # 2 min cooldown per role after reroute dispatch
 
     def __init__(self, coordinator: Coordinator, bus: EventBus, workspace: Path):
         self.coordinator = coordinator
@@ -113,6 +114,7 @@ class SelfHealEngine:
         self._failure_history: list[FailureRecord] = []
         self._circuit_open: dict[str, float] = {}  # role → open_until timestamp
         self._active_heals: set[str] = set()  # task_ids currently being healed
+        self._reroute_cooldowns: dict[str, float] = {}  # role → cooldown_until timestamp
 
         # Stats
         self.stats = {
@@ -252,8 +254,8 @@ class SelfHealEngine:
         # Re-dispatch to the same role
         try:
             from .executive import Task
-            result = await self.coordinator.dispatch_to(
-                record.role, description, priority="high"
+            result = await self.coordinator.dispatch(
+                description=description, target=record.role, priority="high"
             )
             if result and result.tasks and result.tasks[0].status.value == "complete":
                 record.healed = True
@@ -275,6 +277,15 @@ class SelfHealEngine:
         """Switch to a different provider in the chain."""
         self.stats["reroutes_attempted"] += 1
 
+        # Check reroute cooldown — prevent cascading reroute→dispatch→timeout→reroute loops
+        import time as _time
+        cooldown_until = self._reroute_cooldowns.get(record.role, 0)
+        if _time.time() < cooldown_until:
+            remaining = int(cooldown_until - _time.time())
+            logger.warning(f"🩺 Reroute for {record.role} in cooldown ({remaining}s remaining). Skipping re-dispatch.")
+            await self._escalate(record, f"Reroute cooldown active — {remaining}s remaining")
+            return
+
         # Check if provider chain has fallbacks
         provider_chain = getattr(self.coordinator, '_provider_chain', None)
         if not provider_chain:
@@ -294,10 +305,13 @@ class SelfHealEngine:
                 logger.info(f"🩺 ✅ Rerouted {record.role} to next provider")
                 await self._log_heal(record)
 
-                # Retry the task with new provider
+                # Retry the task with new provider — set cooldown to prevent cascading loops
+                self._reroute_cooldowns[record.role] = _time.time() + self.REROUTE_COOLDOWN
                 description = raw_data.get("description", "")
                 if description:
-                    result = await self.coordinator.dispatch_to(record.role, description, priority="high")
+                    result = await self.coordinator.dispatch(
+                        description=description, target=record.role, priority="high"
+                    )
                     if result and result.tasks and result.tasks[0].status.value == "complete":
                         logger.info(f"🩺 ✅ Rerouted task succeeded")
                 return
@@ -336,7 +350,9 @@ class SelfHealEngine:
         # Retry with expanded budget
         description = raw_data.get("description", "")
         if description:
-            await self.coordinator.dispatch_to(record.role, description, priority="high")
+            await self.coordinator.dispatch(
+                description=description, target=record.role, priority="high"
+            )
 
     # ── Strategy: PATCH ──────────────────────────────────────────────────
 
@@ -368,7 +384,9 @@ class SelfHealEngine:
         logger.info(f"🩺 Dispatching patch task to CTO for {classification}")
 
         try:
-            result = await self.coordinator.dispatch_to("cto", patch_task, priority="critical")
+            result = await self.coordinator.dispatch(
+                description=patch_task, target="cto", priority="critical"
+            )
             if result and result.tasks:
                 task_result = result.tasks[0]
                 if task_result.status.value == "complete" and task_result.files_modified:

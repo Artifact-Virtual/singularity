@@ -63,6 +63,7 @@ class ToolExecutor:
         self._csuite_dispatcher: Any = None  # Set by runtime after C-Suite boot
         self._nexus: Any = None  # Set by runtime after NEXUS boot
         self._comb: Any = None  # Set by runtime after memory boot
+        self._poa_manager: Any = None  # Set by runtime after POA boot
         self._hektor: Any = None  # Lazy-initialized HektorMemory instance
         self._current_sender_id: str | None = None  # For @mention enforcement
     
@@ -81,6 +82,10 @@ class ToolExecutor:
     def set_nexus(self, nexus: Any) -> None:
         """Wire the NEXUS self-optimization engine."""
         self._nexus = nexus
+    
+    def set_poa_manager(self, manager: Any) -> None:
+        """Wire the POA manager for poa_manage tool."""
+        self._poa_manager = manager
     
     def set_current_sender(self, sender_id: str | None) -> None:
         """Set the current message sender for @mention enforcement."""
@@ -839,46 +844,61 @@ class ToolExecutor:
         
         action = args.get("action", "list")
         product_id = args.get("product_id", "")
-        workspace_arg = args.get("workspace", "")
         
-        # Check specified workspace, enterprise workspace, then own workspace
-        sg_dirs = []
-        if workspace_arg:
-            p = Path(workspace_arg) / ".singularity"
-            if p.exists():
-                sg_dirs.append(p)
-        enterprise = Path("/home/adam/workspace/enterprise/.singularity")
-        if enterprise.exists():
-            sg_dirs.append(enterprise)
-        own = Path(str(self.workspace)) / ".singularity"
-        if own.exists() and own not in sg_dirs:
-            sg_dirs.append(own)
+        # Use wired manager if available, otherwise discover workspaces
+        if self._poa_manager:
+            all_managers = [self._poa_manager]
+            sg_dirs = [self._poa_manager.workspace]
+        else:
+            sg_dirs = []
+            own = Path(str(self.workspace)) / ".singularity"
+            if own.exists():
+                sg_dirs.append(own)
+            enterprise = Path("/home/adam/workspace/enterprise/.singularity")
+            if enterprise.exists() and enterprise != own:
+                sg_dirs.append(enterprise)
+            
+            if not sg_dirs:
+                return "Error: no workspace with .singularity found"
+            
+            all_managers = [POAManager(d) for d in sg_dirs]
         
-        if not sg_dirs:
-            return "Error: no workspace with .singularity found"
-        
-        # Use first available, but merge for list/status/audit-all
+        mgr = all_managers[0]  # Primary
         sg_dir = sg_dirs[0]
         
-        # Merge managers from all workspaces
-        all_managers = [POAManager(d) for d in sg_dirs]
-        mgr = all_managers[0]  # Primary
-        
         if action == "list":
-            seen = set()
-            lines = ["📋 POA List:"]
+            seen = {}  # product_id → POAConfig (prefer active over retired)
             for m in all_managers:
                 for p in m.list_all():
-                    if p.product_id in seen:
-                        continue
-                    seen.add(p.product_id)
-                    icon = {"active": "🟢", "proposed": "📋", "paused": "⏸️", "retired": "💀"}.get(p.status.value, "⚪")
-                    ep_info = f" ({len(p.endpoints)} endpoints)" if p.endpoints else ""
-                    svc_info = f" svc:{p.service_name}" if p.service_name else ""
-                    lines.append(f"  {icon} {p.product_name} ({p.product_id}) [{p.status.value}]{ep_info}{svc_info}")
-            if len(lines) == 1:
-                return "No POAs configured."
-            lines.insert(1, f"**Total:** {len(seen)}")
+                    existing = seen.get(p.product_id)
+                    if existing is None:
+                        seen[p.product_id] = p
+                    elif p.status.value == "active" and existing.status.value != "active":
+                        seen[p.product_id] = p  # Active takes priority
+            
+            active_poas = [p for p in seen.values() if p.status.value == "active"]
+            other_poas = [p for p in seen.values() if p.status.value != "active"]
+            
+            lines = ["📋 **POA List:**"]
+            lines.append(f"**Active:** {len(active_poas)} | **Other:** {len(other_poas)} | **Total:** {len(seen)}")
+            lines.append("")
+            
+            # Always show active POAs with detail
+            for p in sorted(active_poas, key=lambda x: x.product_name):
+                ep_info = f" ({len(p.endpoints)} endpoints)" if p.endpoints else " (no endpoints)"
+                svc_info = f" svc:{p.service_name}" if p.service_name else ""
+                lines.append(f"  🟢 **{p.product_name}** ({p.product_id}){ep_info}{svc_info}")
+            
+            # Show non-active only as counts by status
+            if other_poas:
+                status_counts = {}
+                for p in other_poas:
+                    status_counts[p.status.value] = status_counts.get(p.status.value, 0) + 1
+                other_summary = ", ".join(f"{v} {k}" for k, v in sorted(status_counts.items()))
+                lines.append(f"\n  _{other_summary}_")
+            
+            if len(active_poas) == 0:
+                lines.append("  _(no active POAs)_")
             return "\n".join(lines)
         
         elif action == "status":

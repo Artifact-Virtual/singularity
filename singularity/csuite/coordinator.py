@@ -172,7 +172,7 @@ class Coordinator:
         priority: str = "normal",
         deadline: Optional[str] = None,
         context: Optional[dict[str, Any]] = None,
-        max_iterations: int = 25,
+        max_iterations: int = 8,
         requester: str = "singularity",
     ) -> DispatchResult:
         """

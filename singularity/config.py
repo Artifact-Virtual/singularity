@@ -152,6 +152,7 @@ class PersonaConfig(BaseModel):
 class CSuiteConfig(BaseModel):
     """C-Suite executive agent configuration."""
     enabled: bool = True
+    executive_model: str = "claude-sonnet-4"  # Lighter model for exec agents (vs Opus coordinator)
     personas: list[PersonaConfig] = Field(default_factory=list)
     report_dir: str = str(Path.home() / "workspace" / "enterprise" / "executives")
 
