@@ -100,6 +100,7 @@ class CortexEngine:
         self._system_prompt: str = ""
         self._prompt_loaded = False
         self._prompt_lock = asyncio.Lock()
+        self._session_locks: dict[str, asyncio.Lock] = {}  # Per-session concurrency guard
         self._context = ContextAssembler(
             context_budget=config.context_budget,
         )
@@ -137,6 +138,22 @@ class CortexEngine:
                 if not self._prompt_loaded:  # double-check after acquiring lock
                     await self._load_system_prompt()
         
+        # Per-session lock: prevents two concurrent messages to the same session
+        # from corrupting history. Different sessions run fully concurrently.
+        if session_id not in self._session_locks:
+            self._session_locks[session_id] = asyncio.Lock()
+        
+        async with self._session_locks[session_id]:
+            return await self._process_inner(session_id, message, source, sender_name)
+    
+    async def _process_inner(
+        self,
+        session_id: str,
+        message: str,
+        source: Any = None,
+        sender_name: str = "",
+    ) -> TurnResult:
+        """Inner process — runs under per-session lock."""
         # 1. Store the inbound message in session
         if not message or not message.strip():
             logger.warning(f"Empty message received for session {session_id[:12]}...")

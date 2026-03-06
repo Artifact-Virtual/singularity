@@ -70,12 +70,12 @@ class DiscordConfig(BaseModel):
     token: str = ""
     guild_ids: list[str] = Field(default_factory=list)
     bot_user_id: str = ""
-    require_mention: bool = True
     dm_policy: str = "allowlist"
     dm_allowlist: list[str] = Field(default_factory=list)
     authorized_users: list[str] = Field(default_factory=list)
+    # Day 21: sibling_bot_ids kept for Discord adapter (filters random bots,
+    # lets known siblings through to the router's @mention check)
     sister_bot_ids: list[str] = Field(default_factory=list)
-    strict_mention_channels: list[str] = Field(default_factory=list)
     status_message: str = "⚡ Singularity Online"
     max_message_length: int = 2000
     reconnect_delay: float = 5.0
@@ -106,7 +106,7 @@ class ToolsConfig(BaseModel):
 class PulseConfig(BaseModel):
     """PULSE iteration budget configuration."""
     default_cap: int = 20
-    expanded_cap: int = 40
+    expanded_cap: int = 100
     expand_threshold: int = 18
     revert_window: int = 3
     revert_threshold: int = 10
@@ -115,7 +115,7 @@ class PulseConfig(BaseModel):
 class BlinkConfig(BaseModel):
     """BLINK seamless continuation configuration."""
     enabled: bool = True
-    max_depth: int = 5          # Max consecutive blinks per conversation turn
+    max_depth: int = 10         # Max consecutive blinks per conversation turn
     prepare_at: int = 3         # Inject preparation message at N remaining iterations
     flush_at: int = 1           # Force flush at N remaining
     cooldown_seconds: float = 1.0  # Delay between blink and resume
@@ -138,7 +138,6 @@ class PersonaConfig(BaseModel):
     system_prompt_inline: str = ""
     model: str = ""
     base_url: str = ""
-    require_mention: Optional[bool] = None
     authorized_users: Optional[list[str]] = None
     workspace: str = ""
     tools_enabled: bool = True

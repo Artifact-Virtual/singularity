@@ -213,16 +213,22 @@ class ChannelCapabilities:
 
 @dataclass
 class ChannelPolicy:
-    """Access control policy for a channel adapter."""
+    """Access control policy for a channel adapter.
+    
+    Day 21 — Mention-Only Protocol:
+    In groups/channels, a message is processed ONLY if it @mentions self_id.
+    When responding, include @mention of target. When not responding, either
+    react with emoji or send without @mention (humans read it, bots ignore it).
+    
+    sibling_bot_ids, require_mention, strict_mention_channels — REMOVED.
+    The @mention check is the ONLY routing rule for groups.
+    """
     dm_policy: str = "deny"        # open, allowlist, deny
-    group_policy: str = "deny"     # open, allowlist, mention-only, deny
+    group_policy: str = "deny"     # kept for config compat, router uses @mention-only
     owner_ids: list[str] = field(default_factory=list)
     allowed_senders: list[str] = field(default_factory=list)
     allowed_groups: list[str] = field(default_factory=list)
     self_id: Optional[str] = None
-    sibling_bot_ids: list[str] = field(default_factory=list)
-    require_mention: bool = False
-    strict_mention_channels: list[str] = field(default_factory=list)
     ignored_channels: list[str] = field(default_factory=list)
 
 

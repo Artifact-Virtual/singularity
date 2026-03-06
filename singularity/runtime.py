@@ -33,6 +33,7 @@ from typing import Any
 
 from .bus import EventBus
 from .config import SingularityConfig, load_config
+from .nerve.presence import presence_manager
 
 import re
 
@@ -626,15 +627,16 @@ class Runtime:
         from .poa.runtime import POARuntime
         from .pulse.scheduler import JobConfig, JobType
         
-        # Check both enterprise and local workspaces for POAs
+        # Check both local and enterprise workspaces for POAs
+        # Local first — it has the active configs
         poa_dirs = []
-        enterprise_poa = Path("/home/adam/workspace/enterprise/.singularity/poas")
         local_poa = Path(self.config.tools.workspace) / ".singularity" / "poas"
+        enterprise_poa = Path("/home/adam/workspace/enterprise/.singularity/poas")
         
-        if enterprise_poa.exists():
-            poa_dirs.append(enterprise_poa.parent)
-        if local_poa.exists() and local_poa != enterprise_poa:
+        if local_poa.exists():
             poa_dirs.append(local_poa.parent)
+        if enterprise_poa.exists() and enterprise_poa != local_poa:
+            poa_dirs.append(enterprise_poa.parent)
         
         if not poa_dirs:
             logger.info("  POA: No POA directories found, skipping")
@@ -838,13 +840,14 @@ class Runtime:
         policies = {}
         
         if dc.token:
+            # Day 21 — Mention-Only Protocol: one rule for all bots.
+            # Process message only if it @mentions this bot's ID (or is a DM).
             policies["discord"] = ChannelPolicy(
                 dm_policy=dc.dm_policy,
-                group_policy="mention-only" if dc.require_mention else "open",
+                group_policy="mention-only",  # kept for compat, router uses @mention check
                 owner_ids=dc.authorized_users,
                 allowed_senders=dc.dm_allowlist,
                 self_id=dc.bot_user_id,
-                sibling_bot_ids=dc.sister_bot_ids,
                 ignored_channels=[],
             )
         
@@ -893,11 +896,45 @@ class Runtime:
                 # Wire adapter to SINEW for discord_send/react tools
                 if self.tools:
                     self.tools.set_discord_adapter(adapter)
+                # ── Register with presence manager ──
+                presence_manager.register_adapter(adapter.typing)
+                if adapter.client:
+                    presence_manager.register_discord_client(adapter.client)
                 logger.info(f"  Discord adapter connected (deployer: {'yes' if self.deployer else 'no'})")
             except Exception as e:
                 logger.error(f"  Discord adapter failed: {e}")
         else:
             logger.info("  Discord adapter skipped (no token)")
+        
+        # ── HTTP API Adapter ────────────────────────────────────────
+        await self._boot_http_api()
+    
+    async def _boot_http_api(self) -> None:
+        """Boot the HTTP API adapter for web/ERP integration."""
+        api_key = os.environ.get("SINGULARITY_API_KEY", "")
+        if not api_key:
+            logger.info("  HTTP API skipped (no SINGULARITY_API_KEY)")
+            return
+        
+        try:
+            from .nerve.http_api import HttpApiAdapter
+            
+            http_adapter = HttpApiAdapter(
+                port=8450,
+                host="0.0.0.0",
+                api_key=api_key,
+                allowed_origins=["*"],
+            )
+            
+            # Wire cortex processor directly
+            if self.cortex:
+                http_adapter.set_processor(self.cortex.process)
+            
+            await http_adapter.connect({})
+            self.adapters["http"] = http_adapter
+            logger.info("  HTTP API adapter ready (port 8450)")
+        except Exception as e:
+            logger.error(f"  HTTP API adapter failed: {e}")
     
     def _extract_exec_roles(self) -> list[tuple[str, str, str, str]]:
         """
@@ -1000,7 +1037,69 @@ class Runtime:
     async def _wire_events(self) -> None:
         """Wire cross-subsystem event handlers."""
         
-        # Routed messages → CORTEX processing
+        # Routed messages → CORTEX processing (NON-BLOCKING)
+        # Each channel gets its own concurrent task so channels never block each other.
+        # The bus handler returns immediately; cortex runs in background tasks.
+        _active_cortex_tasks: dict[str, asyncio.Task] = {}
+
+        async def _process_cortex(envelope) -> None:
+            """Process a single routed message through cortex. Runs as independent task."""
+            session_id = envelope.session_id or envelope.source.chat_id or "default"
+            chat_id = envelope.source.chat_id
+
+            try:
+                result = await self.cortex.process(
+                    session_id=session_id,
+                    message=envelope.payload.text or "",
+                    source=envelope.source,
+                    sender_name=getattr(envelope.source, 'sender_name', ''),
+                )
+
+                # Send response back through the channel
+                if result and result.response:
+                    sender_id = getattr(envelope.source, 'sender_id', None)
+                    channel_type = envelope.source.channel_type or "discord"
+
+                    # Stop typing — we're about to send
+                    presence_manager.stop_typing(chat_id)
+
+                    # Enforce @mention — structural, not prompt-dependent
+                    response_text = _ensure_mention(
+                        result.response, sender_id, channel_type
+                    )
+
+                    logger.info(
+                        f"Sending response to {chat_id}: "
+                        f"{len(response_text)} chars"
+                    )
+
+                    # Route to correct adapter by type
+                    adapter = self.adapters.get(channel_type)
+                    if adapter:
+                        from .nerve.types import OutboundMessage
+                        from .nerve.formatter import format_for_channel
+
+                        chunks = format_for_channel(
+                            response_text,
+                            adapter.capabilities,
+                        )
+                        for chunk in chunks:
+                            send_result = await adapter.send(chat_id, OutboundMessage(content=chunk))
+                            logger.info(f"Send result: {send_result}")
+                else:
+                    presence_manager.stop_typing(chat_id)
+                    logger.warning(
+                        f"No response from cortex for session {session_id[:12]}... "
+                        f"(result={result is not None}, "
+                        f"response={repr(result.response[:100]) if result and result.response else 'empty'})"
+                    )
+
+            except Exception as e:
+                presence_manager.stop_typing(chat_id)
+                logger.error(f"CORTEX processing error in {session_id[:12]}...: {e}")
+            finally:
+                _active_cortex_tasks.pop(session_id, None)
+
         @self.bus.on("nerve.routed")
         async def on_routed(event):
             envelope = event.data.get("envelope")
@@ -1008,65 +1107,24 @@ class Runtime:
                 return
             
             session_id = envelope.session_id or envelope.source.chat_id or "default"
+            chat_id = envelope.source.chat_id
             
-            # Send typing indicator so the user knows we're processing
-            adapter_type = envelope.source.channel_type or "discord"
-            adapter = self.adapters.get(adapter_type)
-            if adapter:
-                try:
-                    await adapter.typing(envelope.source.chat_id)
-                except Exception as e:
-                    logger.debug(f"Suppressed: {e}")
+            # Start sustained typing + set activity to thinking
+            presence_manager.start_typing(chat_id)
             
-            # Process through cortex engine
+            # Process through cortex engine — NON-BLOCKING
             if self.cortex:
-                try:
-                    result = await self.cortex.process(
-                        session_id=session_id,
-                        message=envelope.payload.text or "",
-                        source=envelope.source,
-                        sender_name=getattr(envelope.source, 'sender_name', ''),
-                    )
-                    
-                    # Send response back through the channel
-                    if result and result.response:
-                        adapter_id = envelope.source.adapter_id
-                        chat_id = envelope.source.chat_id
-                        sender_id = getattr(envelope.source, 'sender_id', None)
-                        channel_type = envelope.source.channel_type or "discord"
-                        
-                        # Enforce @mention — structural, not prompt-dependent
-                        response_text = _ensure_mention(
-                            result.response, sender_id, channel_type
-                        )
-                        
-                        logger.info(
-                            f"Sending response to {chat_id}: "
-                            f"{len(response_text)} chars"
-                        )
-                        
-                        # Route to correct adapter by type
-                        adapter = self.adapters.get(channel_type)
-                        if adapter:
-                            from .nerve.types import OutboundMessage
-                            from .nerve.formatter import format_for_channel
-                            
-                            chunks = format_for_channel(
-                                response_text,
-                                adapter.capabilities,
-                            )
-                            for chunk in chunks:
-                                send_result = await adapter.send(chat_id, OutboundMessage(content=chunk))
-                                logger.info(f"Send result: {send_result}")
-                    else:
-                        logger.warning(
-                            f"No response from cortex for session {session_id[:12]}... "
-                            f"(result={result is not None}, "
-                            f"response={repr(result.response[:100]) if result and result.response else 'empty'})"
-                        )
+                # Cancel existing task for this session if still running
+                # (prevents message pile-up on the same channel)
+                existing = _active_cortex_tasks.get(session_id)
+                if existing and not existing.done():
+                    logger.info(f"Session {session_id[:12]}... has pending cortex task, queuing new message")
                 
-                except Exception as e:
-                    logger.error(f"CORTEX processing error: {e}")
+                task = asyncio.create_task(
+                    _process_cortex(envelope),
+                    name=f"cortex-{session_id[:16]}",
+                )
+                _active_cortex_tasks[session_id] = task
         
         # Immune alerts → send to alert channel
         @self.bus.on("immune.alert")
@@ -1084,7 +1142,22 @@ class Runtime:
                 except Exception as e:
                     logger.error(f"Alert delivery failed: {e}")
         
-        # C-Suite task completion → log and optionally report to channels
+        # ── Presence: tool lifecycle → Discord activity states ──────
+        @self.bus.on("cortex.tool.executing")
+        async def on_tool_start(event):
+            tool_name = event.data.get("tool", "")
+            presence_manager.tool_start(tool_name)
+        
+        @self.bus.on("cortex.tool.done")
+        async def on_tool_done(event):
+            tool_name = event.data.get("tool", "")
+            presence_manager.tool_end(tool_name)
+        
+        @self.bus.on("cortex.llm.response")
+        async def on_llm_response(event):
+            presence_manager.llm_streaming()
+        
+                # C-Suite task completion → log and optionally report to channels
         @self.bus.on("csuite.task.completed")
         async def on_csuite_completed(event):
             data = event.data
@@ -1163,7 +1236,8 @@ class Runtime:
                         request_id = request_file.stem
                         
                         target = request.get("target", "auto")
-                        description = request.get("description", "")
+                        # Accept both "description" and "task" field names
+                        description = request.get("description", "") or request.get("task", "")
                         priority = request.get("priority", "normal")
                         max_iterations = request.get("max_iterations", 8)
                         
@@ -1235,6 +1309,9 @@ class Runtime:
         self._running = False
         
         logger.info("Shutting down...")
+        
+        # Stop presence manager first (clean up typing indicators)
+        presence_manager.stop_all()
         
         # Stop in reverse order
         for name, adapter in self.adapters.items():

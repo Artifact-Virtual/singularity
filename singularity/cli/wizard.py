@@ -543,7 +543,6 @@ class InitWizard:
             if owner_id:
                 discord_config["authorized_users"] = [owner_id]
 
-            discord_config["require_mention"] = _confirm("Require @mention in channels?", default=True)
             discord_config["dm_policy"] = "allowlist" if _confirm("Restrict DMs to allowlist?", default=True) else "open"
 
             if discord_config["dm_policy"] == "allowlist" and owner_id:
@@ -825,7 +824,6 @@ class InitWizard:
                 "token": discord["token"],
                 "guild_ids": discord.get("guild_ids", []),
                 "authorized_users": discord.get("authorized_users", []),
-                "require_mention": discord.get("require_mention", True),
                 "dm_policy": discord.get("dm_policy", "allowlist"),
                 "dm_allowlist": discord.get("dm_allowlist", []),
                 "status_message": "⚡ Singularity Online",

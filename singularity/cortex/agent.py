@@ -177,6 +177,14 @@ class AgentLoop:
                 
                 self._total_tokens += response.total_tokens
                 
+                # Emit LLM response event (for presence: back to thinking)
+                if self.bus:
+                    await self.bus.emit_nowait("cortex.llm.response", {
+                        "turn_id": self._turn_id,
+                        "iteration": self._iteration,
+                        "has_tool_calls": response.has_tool_calls,
+                    }, source="cortex")
+                
                 logger.debug(
                     f"[{self._turn_id}] Iteration {self._iteration}: "
                     f"{response.finish_reason}, "
@@ -338,5 +346,13 @@ class AgentLoop:
         
         if logger.isEnabledFor(logging.INFO):
             logger.info(f"[{self._turn_id}] Tool {name}: {len(result)} chars output")
+        
+        # Emit tool done event
+        if self.bus:
+            await self.bus.emit_nowait("cortex.tool.done", {
+                "turn_id": self._turn_id,
+                "tool": name,
+                "iteration": self._iteration,
+            }, source="cortex")
         
         return result

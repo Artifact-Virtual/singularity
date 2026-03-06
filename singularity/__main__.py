@@ -706,7 +706,6 @@ async def test_skeleton():
             owner_ids=["owner-1"],
             allowed_senders=["allowed-1"],
             self_id="bot-id",
-            sibling_bot_ids=["sister-1"],
             ignored_channels=["ignored-chan"],
         )
         

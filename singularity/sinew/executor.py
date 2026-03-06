@@ -845,23 +845,19 @@ class ToolExecutor:
         action = args.get("action", "list")
         product_id = args.get("product_id", "")
         
-        # Use wired manager if available, otherwise discover workspaces
-        if self._poa_manager:
-            all_managers = [self._poa_manager]
-            sg_dirs = [self._poa_manager.workspace]
-        else:
-            sg_dirs = []
-            own = Path(str(self.workspace)) / ".singularity"
-            if own.exists():
-                sg_dirs.append(own)
-            enterprise = Path("/home/adam/workspace/enterprise/.singularity")
-            if enterprise.exists() and enterprise != own:
-                sg_dirs.append(enterprise)
-            
-            if not sg_dirs:
-                return "Error: no workspace with .singularity found"
-            
-            all_managers = [POAManager(d) for d in sg_dirs]
+        # Always discover both workspaces — local first (has active POAs)
+        sg_dirs = []
+        own = Path(str(self.workspace)) / ".singularity"
+        if own.exists():
+            sg_dirs.append(own)
+        enterprise = Path("/home/adam/workspace/enterprise/.singularity")
+        if enterprise.exists() and enterprise != own:
+            sg_dirs.append(enterprise)
+        
+        if not sg_dirs:
+            return "Error: no workspace with .singularity found"
+        
+        all_managers = [POAManager(d) for d in sg_dirs]
         
         mgr = all_managers[0]  # Primary
         sg_dir = sg_dirs[0]

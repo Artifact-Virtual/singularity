@@ -381,33 +381,14 @@ class Executive:
             return f"TOOL ERROR: {tool_name} failed — {e}"
 
     def _check_path_permission(self, path: str, write: bool = False) -> bool:
-        """Check if a path is within allowed directories."""
-        # Normalize
-        path = path.lstrip("/").lstrip("./")
-
-        # Check forbidden first
-        for fp in self.role.tools.forbidden_paths:
-            if path.startswith(fp.lstrip("./")):
-                return False
-
-        # Check read-only paths (block writes)
-        if write:
-            for rp in self.role.tools.read_paths:
-                if path.startswith(rp.lstrip("./")):
-                    return False
-
-        # Check writable workspace paths
-        for wp in self.role.tools.write_paths:
-            if path.startswith(wp.lstrip("./")):
-                return True
-
-        # Check read-only paths (allow reads)
-        if not write:
-            for rp in self.role.tools.read_paths:
-                if path.startswith(rp.lstrip("./")):
-                    return True
-
-        return False
+        """Check if a path is within allowed directories.
+        
+        Delegates to ToolScope.allows_path() which correctly handles
+        the case where no paths are configured (allow all).
+        """
+        # Normalize — strip leading / and ./ for consistent matching
+        normalized = path.lstrip("/").lstrip("./")
+        return self.role.tools.allows_path(normalized, write=write)
 
     def _extract_findings(self, response: str) -> list[str]:
         """Extract bullet-point findings from structured response."""

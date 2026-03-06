@@ -4,9 +4,25 @@ NERVE — Inbound Router
 
 Sits between channel adapters and the agent loop.
 Handles: policy enforcement, session routing, priority assignment,
-deduplication, interrupt detection, sibling coordination.
+deduplication, interrupt detection.
 
-Ported from Mach6's router.ts, adapted for Singularity's event bus.
+=== MENTION-ONLY PROTOCOL (Day 21 — Ali's design) ===
+
+ONE RULE FOR ALL BOTS:
+
+A bot processes a message IF AND ONLY IF:
+  1. It's a DM from an allowed sender, OR
+  2. The message contains @mention of this bot's ID
+
+When a bot WANTS to respond → include @mention of the target
+When a bot does NOT want to respond → either:
+  a) React with emoji (acknowledged, no text, no loop)
+  b) Send text WITHOUT any @mention → hits chat, humans read it, no bot picks it up
+
+This kills echo loops structurally. No cooldown timers. No sibling tracking.
+No complex routing policies. Just: "does this message mention ME? No → ignore."
+
+@end in any message = universal stop. No bot processes it. Period.
 """
 
 from __future__ import annotations
@@ -50,10 +66,6 @@ _RE_AT_END = re.compile(r'@end\b', re.IGNORECASE)
 # ── JID Normalization (WhatsApp) ────────────────────────────────────
 
 def _normalize_jid(jid: str) -> str:
-    """Strip device suffix from WhatsApp JIDs.
-    
-    "num:device@s.whatsapp.net" → "num@s.whatsapp.net"
-    """
     return _RE_JID_DEVICE.sub(r"@s.whatsapp.net", jid)
 
 
@@ -69,22 +81,15 @@ def _jid_in_list(jid: str, targets: list[str]) -> bool:
 # ── Deduplication Cache ─────────────────────────────────────────────
 
 class DeduplicationCache:
-    """LRU-ish dedup cache with TTL eviction."""
-
     def __init__(self, max_size: int = 10_000, ttl: float = 300.0):
         self._seen: dict[str, float] = {}
         self._max_size = max_size
         self._ttl = ttl
 
     def check(self, message_id: str) -> bool:
-        """Returns True if this is a duplicate."""
         now = time.time()
-
-        # Check BEFORE eviction — duplicates must be detected even at capacity
         if message_id in self._seen:
             return True
-
-        # Only evict during insertion of new items
         self._evict(now)
         self._seen[message_id] = now
         return False
@@ -92,11 +97,9 @@ class DeduplicationCache:
     def _evict(self, now: float) -> None:
         if len(self._seen) < self._max_size:
             return
-        # Remove expired
         expired = [k for k, ts in self._seen.items() if now - ts > self._ttl]
         for k in expired:
             del self._seen[k]
-        # If still over, remove oldest
         if len(self._seen) >= self._max_size:
             oldest = next(iter(self._seen))
             del self._seen[oldest]
@@ -105,13 +108,9 @@ class DeduplicationCache:
 # ── Session Route ───────────────────────────────────────────────────
 
 class SessionRoute:
-    """Maps adapter+chat to a session."""
-
     __slots__ = ("channel_type", "chat_id", "session_id", "last_active")
 
-    def __init__(
-        self, channel_type: str, chat_id: str, session_id: str
-    ):
+    def __init__(self, channel_type: str, chat_id: str, session_id: str):
         self.channel_type = channel_type
         self.chat_id = chat_id
         self.session_id = session_id
@@ -122,18 +121,13 @@ class SessionRoute:
 
 class InboundRouter:
     """
-    Routes inbound messages from channel adapters to sessions.
-    
-    Enforces access policies, assigns priorities, detects interrupts,
-    deduplicates, and manages session routing.
+    Routes inbound messages using the Mention-Only Protocol.
     
     Events emitted:
         nerve.routed     — message passed policy, assigned to session
         nerve.rejected   — message rejected by policy
         nerve.interrupt  — interrupt detected during active turn
     """
-
-    SIBLING_COOLDOWN = 10.0  # seconds
 
     def __init__(
         self,
@@ -149,9 +143,8 @@ class InboundRouter:
         self._global_owner_ids = global_owner_ids or []
         self._get_active_sessions = active_sessions_fn or (lambda: set())
         self._dedup = DeduplicationCache()
-        self._routes: dict[str, SessionRoute] = {}  # "adapter:chat" → route
+        self._routes: dict[str, SessionRoute] = {}
         self._session_counter = 0
-        self._sibling_last_response: dict[str, float] = {}
 
     def route(
         self,
@@ -159,48 +152,34 @@ class InboundRouter:
         payload: InboundPayload,
         platform_message_id: Optional[str] = None,
     ) -> bool:
-        """
-        Route an inbound message. Returns False if rejected by policy.
-        
-        On success, emits nerve.routed with the full BusEnvelope.
-        On rejection, emits nerve.rejected.
-        
-        This is sync-safe — emits are scheduled on the running event loop.
-        """
+        """Route an inbound message. Returns False if rejected."""
         logger.info(
             "route() called: sender=%s chat=%s type=%s mentions=%s mid=%s",
             source.sender_id, source.chat_id, source.chat_type,
             source.mentions, platform_message_id,
         )
+
         # 1. Deduplication
         dedup_key = platform_message_id or f"{source.adapter_id}:{source.chat_id}:{time.time()}"
         if self._dedup.check(dedup_key):
             logger.info("Dedup rejected: %s from %s", dedup_key, source.sender_id)
             return False
 
-        # 2. Policy check
+        # 2. @end — universal conversation terminator
+        if payload.text and _RE_AT_END.search(payload.text):
+            logger.info("@end terminator: %s in %s", source.sender_id, source.chat_id)
+            return False
+
+        # 3. Policy check (mention-only protocol)
         policy = self._get_policy(source.channel_type)
         if not self._check_policy(policy, source):
-            logger.info("Policy rejected: %s in %s (policy=%s)", source.sender_id, source.chat_id, source.channel_type)
+            logger.info("Policy rejected: %s in %s", source.sender_id, source.chat_id)
             self._schedule_emit("nerve.rejected", {
                 "reason": "policy",
                 "sender": source.sender_id,
                 "chat": source.chat_id,
             })
             return False
-
-        # 2a. @end — universal conversation terminator. Any message containing @end
-        # signals "do not respond." Both bots honor this. No LLM turn, no reaction.
-        if payload.text and _RE_AT_END.search(payload.text):
-            logger.info("@end terminator: %s in %s — not responding", source.sender_id, source.chat_id)
-            return False
-
-        # 3. Sibling cooldown
-        if source.sender_id in (policy.sibling_bot_ids or []):
-            cooldown_key = f"{source.adapter_id}:{source.chat_id}"
-            last = self._sibling_last_response.get(cooldown_key, 0)
-            if time.time() - last < self.SIBLING_COOLDOWN:
-                return False
 
         # 4. Resolve session
         session_id = self._resolve_session(source)
@@ -232,12 +211,10 @@ class InboundRouter:
         return True
 
     def _schedule_emit(self, event_name: str, data: dict) -> None:
-        """Schedule an async emit on the running event loop."""
         try:
             loop = asyncio.get_running_loop()
             loop.create_task(self._bus.emit(event_name, data))
         except RuntimeError:
-            # No running loop — store for later retrieval
             logger.debug("No event loop, buffering event: %s", event_name)
 
     # ── Policy ───────────────────────────────────────────────────────
@@ -246,52 +223,31 @@ class InboundRouter:
         return self._policies.get(channel_type, self._default_policy)
 
     def _check_policy(self, policy: ChannelPolicy, source: ChannelSource) -> bool:
-        # Sibling yield: if message @mentions a sibling but NOT us, yield
-        if (
-            policy.sibling_bot_ids
-            and policy.self_id
-            and source.mentions
-        ):
-            mentions_me = policy.self_id in source.mentions
-            mentions_sibling = any(
-                sid in source.mentions for sid in policy.sibling_bot_ids
-            )
-            if mentions_sibling and not mentions_me:
-                return False
-
+        """
+        Mention-Only Protocol (Day 21):
+        
+        DMs: allowed senders get through (allowlist) or everyone (open)
+        Groups/Channels/Threads: message MUST contain @mention of this bot's self_id
+        
+        That's it. One rule.
+        """
         # Ignored channels
         if source.chat_id in (policy.ignored_channels or []):
             return False
 
-        # Strict-mention channels
-        if source.chat_id in (policy.strict_mention_channels or []):
-            return self._is_mentioned(policy, source)
-
-        # Owner bypass
-        if self._is_owner(policy, source.sender_id):
-            return True
-
-        # DM policy
+        # DMs — use DM policy (owner bypass, allowlist, open, deny)
         if source.chat_type == ChatType.DM:
+            if self._is_owner(policy, source.sender_id):
+                return True
             if policy.dm_policy == "open":
                 return True
             if policy.dm_policy == "allowlist":
                 return _jid_in_list(source.sender_id, policy.allowed_senders)
             return False  # deny
 
-        # Group/Channel policy
-        if source.chat_type in (ChatType.GROUP, ChatType.CHANNEL):
-            if policy.group_policy == "open":
-                return True
-            if policy.group_policy == "allowlist":
-                return _jid_in_list(source.chat_id, policy.allowed_groups)
-            if policy.group_policy == "mention-only":
-                return self._is_mentioned(policy, source)
-            return False  # deny
-
-        # Thread inherits group policy
-        if source.chat_type == ChatType.THREAD:
-            return policy.group_policy != "deny"
+        # Groups, Channels, Threads — ONLY respond if @mentioned
+        if source.chat_type in (ChatType.GROUP, ChatType.CHANNEL, ChatType.THREAD):
+            return self._is_mentioned(policy, source)
 
         return False
 
@@ -335,7 +291,6 @@ class InboundRouter:
         payload: InboundPayload,
         session_id: str,
     ) -> MessagePriority:
-        # Non-text payloads
         if payload.type in (PayloadType.TYPING, PayloadType.PRESENCE):
             return MessagePriority.BACKGROUND
         if payload.type == PayloadType.REACTION:
@@ -344,11 +299,9 @@ class InboundRouter:
         is_owner = self._is_owner(policy, source.sender_id)
         text = (payload.text or "").strip()
 
-        # Check active sessions
         active = self._get_active_sessions()
         session_active = session_id in active
 
-        # Owner during active turn
         if is_owner and session_active:
             if any(p.search(text) for p in INTERRUPT_PATTERNS):
                 return MessagePriority.INTERRUPT
@@ -360,11 +313,7 @@ class InboundRouter:
         if source.chat_type == ChatType.DM:
             return MessagePriority.NORMAL
 
-        if source.chat_type in (ChatType.GROUP, ChatType.CHANNEL):
-            if self._is_mentioned(policy, source):
-                return MessagePriority.NORMAL
-
-        return MessagePriority.LOW
+        return MessagePriority.NORMAL  # If we got here, we were @mentioned
 
     # ── Route Management ─────────────────────────────────────────────
 
@@ -376,7 +325,6 @@ class InboundRouter:
         return route.session_id if route else None
 
     def prune_routes(self, max_idle: float = 3600.0) -> int:
-        """Remove routes idle for more than max_idle seconds."""
         now = time.time()
         stale = [
             k for k, r in self._routes.items()
@@ -388,11 +336,3 @@ class InboundRouter:
 
     def set_policy(self, channel_type: str, policy: ChannelPolicy) -> None:
         self._policies[channel_type] = policy
-
-    def record_sibling_response(self, adapter_id: str, chat_id: str) -> None:
-        """Record that we responded to a sibling (activates cooldown)."""
-        self._sibling_last_response[f"{adapter_id}:{chat_id}"] = time.time()
-
-    def is_sibling_bot(self, channel_type: str, sender_id: str) -> bool:
-        policy = self._get_policy(channel_type)
-        return sender_id in (policy.sibling_bot_ids or [])

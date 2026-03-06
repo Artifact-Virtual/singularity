@@ -163,7 +163,8 @@ async def test_config_defaults():
     cfg = SingularityConfig()
     assert cfg.pulse.default_cap == 20
     assert cfg.voice.temperature == 0.5
-    assert cfg.discord.require_mention is True
+    # require_mention removed in Day 21 — Mention-Only Protocol
+    # Router now uses @mention-only check for all group messages
 
 
 async def test_config_load_yaml():
