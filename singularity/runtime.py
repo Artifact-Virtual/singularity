@@ -1038,67 +1038,80 @@ class Runtime:
         """Wire cross-subsystem event handlers."""
         
         # Routed messages → CORTEX processing (NON-BLOCKING)
-        # Each channel gets its own concurrent task so channels never block each other.
-        # The bus handler returns immediately; cortex runs in background tasks.
-        _active_cortex_tasks: dict[str, asyncio.Task] = {}
+        # 
+        # Architecture:
+        #   - Different sessions run CONCURRENTLY (via asyncio.create_task)
+        #   - Same-session messages SERIALIZE (via per-session asyncio.Lock)
+        #   - Bus handler returns IMMEDIATELY (never blocks other events)
+        #
+        # This means: #dispatch, #cto, #bridge etc. all process in parallel.
+        # But two rapid messages in #dispatch queue properly, preserving order.
+        _session_locks: dict[str, asyncio.Lock] = {}
+        _active_tasks: set[asyncio.Task] = set()
 
         async def _process_cortex(envelope) -> None:
             """Process a single routed message through cortex. Runs as independent task."""
             session_id = envelope.session_id or envelope.source.chat_id or "default"
             chat_id = envelope.source.chat_id
 
-            try:
-                result = await self.cortex.process(
-                    session_id=session_id,
-                    message=envelope.payload.text or "",
-                    source=envelope.source,
-                    sender_name=getattr(envelope.source, 'sender_name', ''),
-                )
-
-                # Send response back through the channel
-                if result and result.response:
-                    sender_id = getattr(envelope.source, 'sender_id', None)
-                    channel_type = envelope.source.channel_type or "discord"
-
-                    # Stop typing — we're about to send
-                    presence_manager.stop_typing(chat_id)
-
-                    # Enforce @mention — structural, not prompt-dependent
-                    response_text = _ensure_mention(
-                        result.response, sender_id, channel_type
+            # Per-session lock: same session serializes, different sessions parallel
+            if session_id not in _session_locks:
+                _session_locks[session_id] = asyncio.Lock()
+            
+            async with _session_locks[session_id]:
+                # Start typing inside the lock — only when we're actually processing
+                presence_manager.start_typing(chat_id)
+                
+                try:
+                    result = await self.cortex.process(
+                        session_id=session_id,
+                        message=envelope.payload.text or "",
+                        source=envelope.source,
+                        sender_name=getattr(envelope.source, 'sender_name', ''),
                     )
 
-                    logger.info(
-                        f"Sending response to {chat_id}: "
-                        f"{len(response_text)} chars"
-                    )
+                    # Send response back through the channel
+                    if result and result.response:
+                        sender_id = getattr(envelope.source, 'sender_id', None)
+                        channel_type = envelope.source.channel_type or "discord"
 
-                    # Route to correct adapter by type
-                    adapter = self.adapters.get(channel_type)
-                    if adapter:
-                        from .nerve.types import OutboundMessage
-                        from .nerve.formatter import format_for_channel
+                        # Stop typing — we're about to send
+                        presence_manager.stop_typing(chat_id)
 
-                        chunks = format_for_channel(
-                            response_text,
-                            adapter.capabilities,
+                        # Enforce @mention — structural, not prompt-dependent
+                        response_text = _ensure_mention(
+                            result.response, sender_id, channel_type
                         )
-                        for chunk in chunks:
-                            send_result = await adapter.send(chat_id, OutboundMessage(content=chunk))
-                            logger.info(f"Send result: {send_result}")
-                else:
-                    presence_manager.stop_typing(chat_id)
-                    logger.warning(
-                        f"No response from cortex for session {session_id[:12]}... "
-                        f"(result={result is not None}, "
-                        f"response={repr(result.response[:100]) if result and result.response else 'empty'})"
-                    )
 
-            except Exception as e:
-                presence_manager.stop_typing(chat_id)
-                logger.error(f"CORTEX processing error in {session_id[:12]}...: {e}")
-            finally:
-                _active_cortex_tasks.pop(session_id, None)
+                        logger.info(
+                            f"Sending response to {chat_id}: "
+                            f"{len(response_text)} chars"
+                        )
+
+                        # Route to correct adapter by type
+                        adapter = self.adapters.get(channel_type)
+                        if adapter:
+                            from .nerve.types import OutboundMessage
+                            from .nerve.formatter import format_for_channel
+
+                            chunks = format_for_channel(
+                                response_text,
+                                adapter.capabilities,
+                            )
+                            for chunk in chunks:
+                                send_result = await adapter.send(chat_id, OutboundMessage(content=chunk))
+                                logger.info(f"Send result: {send_result}")
+                    else:
+                        presence_manager.stop_typing(chat_id)
+                        logger.warning(
+                            f"No response from cortex for session {session_id[:12]}... "
+                            f"(result={result is not None}, "
+                            f"response={repr(result.response[:100]) if result and result.response else 'empty'})"
+                        )
+
+                except Exception as e:
+                    presence_manager.stop_typing(chat_id)
+                    logger.error(f"CORTEX processing error in {session_id[:12]}...: {e}")
 
         @self.bus.on("nerve.routed")
         async def on_routed(event):
@@ -1106,25 +1119,18 @@ class Runtime:
             if not envelope:
                 return
             
-            session_id = envelope.session_id or envelope.source.chat_id or "default"
-            chat_id = envelope.source.chat_id
+            if not self.cortex:
+                return
             
-            # Start sustained typing + set activity to thinking
-            presence_manager.start_typing(chat_id)
-            
-            # Process through cortex engine — NON-BLOCKING
-            if self.cortex:
-                # Cancel existing task for this session if still running
-                # (prevents message pile-up on the same channel)
-                existing = _active_cortex_tasks.get(session_id)
-                if existing and not existing.done():
-                    logger.info(f"Session {session_id[:12]}... has pending cortex task, queuing new message")
-                
-                task = asyncio.create_task(
-                    _process_cortex(envelope),
-                    name=f"cortex-{session_id[:16]}",
-                )
-                _active_cortex_tasks[session_id] = task
+            # Fire-and-forget: spawn a task so the bus handler returns immediately.
+            # Different sessions process concurrently. Same-session messages
+            # serialize via per-session lock (preserving message order).
+            task = asyncio.create_task(
+                _process_cortex(envelope),
+                name=f"cortex:{(envelope.source.chat_id or 'unknown')[:16]}",
+            )
+            _active_tasks.add(task)
+            task.add_done_callback(_active_tasks.discard)
         
         # Immune alerts → send to alert channel
         @self.bus.on("immune.alert")
