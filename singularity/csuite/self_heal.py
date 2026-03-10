@@ -76,6 +76,9 @@ ERROR_PATTERNS: list[tuple[re.Pattern, HealStrategy, str]] = [
     (re.compile(r"quota|billing|payment|insufficient", re.I), HealStrategy.REROUTE, "quota_exhausted"),
     (re.compile(r"provider.*down|all providers failed|no.*available", re.I), HealStrategy.REROUTE, "provider_down"),
 
+    # Empty / failed responses (no error, just no output)
+    (re.compile(r"status=failed|empty.*response|no.*output|response.*empty", re.I), HealStrategy.RETRY, "empty_response"),
+
     # Iteration / budget exhaustion
     (re.compile(r"max.*iteration|iteration.*cap|timeout.*iteration", re.I), HealStrategy.EXPAND, "iteration_cap"),
     
@@ -152,6 +155,14 @@ class SelfHealEngine:
 
         role = data.get("role", "unknown")
         error = data.get("error") or data.get("response", "") or f"status={status}"
+
+        # Include iteration/duration context for better classification
+        iterations = data.get("iterations_used", 0)
+        duration = data.get("duration_seconds", 0)
+        if status == "timeout" and not data.get("error"):
+            error = f"timeout after {iterations} iterations ({duration:.0f}s)"
+        elif status == "failed" and not data.get("error") and not data.get("response"):
+            error = f"status=failed, empty response after {iterations} iterations ({duration:.0f}s)"
 
         await self._handle_failure(task_id, role, error, data)
 

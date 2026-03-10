@@ -228,13 +228,42 @@ class Executive:
 
                 logger.info(
                     f"{self.name} iter {iterations}/{task.max_iterations}: "
-                    f"content={len(llm_response.content or '')} tool_calls={len(llm_response.tool_calls)}"
+                    f"content={len(llm_response.content or '')} tool_calls={len(llm_response.tool_calls)} "
+                    f"finish={llm_response.finish_reason}"
                 )
+
+                # Handle output truncation (finish_reason=length)
+                # When the LLM hits max_tokens, tool call JSON is truncated → garbage args
+                # Recovery: discard the truncated output, tell LLM to be more concise
+                if llm_response.finish_reason == "length" and llm_response.tool_calls:
+                    logger.warning(
+                        f"{self.name} output truncated (finish_reason=length) on iteration {iterations} — "
+                        f"discarding {len(llm_response.tool_calls)} truncated tool call(s), requesting concise retry"
+                    )
+                    messages.append(ChatMessage(
+                        role="user",
+                        content=(
+                            "Your previous response was truncated due to output length limits. "
+                            "Do NOT try to write large files in a single tool call. "
+                            "Break large writes into smaller chunks, or use exec with echo/cat. "
+                            "Continue your task with shorter, more focused tool calls."
+                        ),
+                    ))
+                    continue
 
                 # If no tool calls, we're done — this is the final response
                 if not llm_response.tool_calls:
                     response_text = llm_response.content or ""
                     if not response_text:
+                        # Empty response with no tool calls — could be a proxy silent failure
+                        # Try once more before giving up
+                        if iterations < task.max_iterations:
+                            logger.warning(f"{self.name} got empty response on iteration {iterations} — retrying")
+                            messages.append(ChatMessage(
+                                role="user",
+                                content="Your previous response was empty. Please continue your task and provide your analysis.",
+                            ))
+                            continue
                         logger.warning(f"{self.name} got empty response with no tool calls on iteration {iterations}")
                     break
 

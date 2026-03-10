@@ -27,7 +27,7 @@ from typing import Any, Optional
 
 from .agent import AgentLoop, AgentConfig, TurnResult
 from .blink import BlinkController, BlinkConfig, BlinkPhase
-from .context import ContextAssembler, build_system_prompt
+from .context import ContextAssembler, build_system_prompt, extract_archive_summary
 from ..voice.provider import ChatMessage
 from ..voice.chain import ProviderChain
 from ..sinew.executor import ToolExecutor
@@ -215,6 +215,63 @@ class CortexEngine:
                     new_message=chat_history[-1] if blink.state.depth == 0 else None,
                 )
                 
+                # ── Layer 1: Context Monitor — compaction check ──
+                history_for_check = chat_history[:-1] if blink.state.depth == 0 else chat_history
+                if self._context.needs_compaction(history_for_check, threshold=0.75):
+                    logger.warning(
+                        f"Context at >75%% capacity for session {session_id[:12]}... "
+                        f"— auto-staging to COMB and compacting"
+                    )
+                    # Auto-stage critical context to COMB before compaction
+                    await self._auto_stage_comb(session_id, history_for_check)
+                    
+                    # Extract summary and compact
+                    summary = extract_archive_summary(history_for_check)
+                    
+                    # Keep only recent messages (last 30% of history)
+                    keep_count = max(10, len(history_for_check) // 3)
+                    kept_msgs = history_for_check[-keep_count:]
+                    
+                    # Inject summary as system message at the start
+                    summary_msg = Message(role="system", content=summary)
+                    compacted = [summary_msg] + [
+                        Message(
+                            role=m.role,
+                            content=m.content,
+                            tool_calls=m.tool_calls,
+                            tool_call_id=m.tool_call_id,
+                            name=m.name,
+                        )
+                        for m in kept_msgs
+                    ]
+                    
+                    # Replace in session store
+                    await self.sessions.replace_messages(session_id, compacted)
+                    
+                    # Re-assemble with compacted history
+                    chat_history_compact = []
+                    for m in compacted:
+                        cm = ChatMessage.__new__(ChatMessage)
+                        cm.role = m.role
+                        cm.content = m.content or ""
+                        cm.tool_calls = m.tool_calls
+                        cm.tool_call_id = m.tool_call_id
+                        cm.name = m.name
+                        chat_history_compact.append(cm)
+                    
+                    messages = self._context.assemble(
+                        system_prompt=self._system_prompt,
+                        history=chat_history_compact,
+                        new_message=chat_history[-1] if blink.state.depth == 0 else None,
+                    )
+                    
+                    if self.bus:
+                        await self.bus.emit_nowait("cortex.context.compacted", {
+                            "session_id": session_id,
+                            "dropped": len(history_for_check) - keep_count,
+                            "kept": keep_count,
+                        }, source="cortex")
+                
                 # Spawn a fresh AgentLoop with blink awareness
                 loop = AgentLoop(
                     voice=self.voice,
@@ -322,6 +379,44 @@ class CortexEngine:
         )
         
         return final_result
+    
+    async def _auto_stage_comb(
+        self,
+        session_id: str,
+        history: list,
+    ) -> None:
+        """Auto-stage critical context to COMB before compaction.
+        
+        Extracts key information from the session history and stages it
+        so context survives even if the session is compacted or restarted.
+        """
+        try:
+            summary_parts = [f"[Auto-staged on compaction — session {session_id[:12]}...]"]
+            
+            # Extract last few assistant text responses as key context
+            assistant_texts = []
+            for msg in reversed(history):
+                if msg.role == "assistant" and hasattr(msg, 'content') and msg.content and not getattr(msg, 'tool_calls', None):
+                    text = msg.content.strip()
+                    if text and len(text) > 20:
+                        # First 200 chars of each
+                        assistant_texts.append(text[:200])
+                        if len(assistant_texts) >= 3:
+                            break
+            
+            if assistant_texts:
+                summary_parts.append("Recent findings: " + " | ".join(reversed(assistant_texts)))
+            
+            stage_content = "\n".join(summary_parts)
+            
+            if self.comb:
+                await self.comb.stage(stage_content)
+                logger.info(f"COMB auto-staged {len(stage_content)} chars on compaction")
+            else:
+                logger.debug("No COMB instance — skipping auto-stage")
+                
+        except Exception as e:
+            logger.warning(f"COMB auto-stage failed: {e}")
     
     async def _load_system_prompt(self) -> None:
         """Load system prompt from identity files + config."""

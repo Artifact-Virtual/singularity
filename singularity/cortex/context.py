@@ -201,6 +201,200 @@ class ContextAssembler:
         return total_chars > (budget_chars * threshold)
 
 
+# ── Layer 2: Tool Result Compression ─────────────────────────────
+# After the LLM has consumed tool results (in prior iterations),
+# compress large results to summaries. Saves context budget.
+
+COMPRESS_THRESHOLD = 500  # chars — don't compress small results
+PRESERVED_TOOLS = {"comb_recall", "comb_stage"}  # Never compress these
+
+
+def compress_tool_results(
+    messages: list[ChatMessage],
+    current_iteration: int,
+) -> list[ChatMessage]:
+    """Compress tool results from previous iterations.
+    
+    Only compresses tool results that the LLM has already seen
+    (i.e., not the results from the most recent tool call batch).
+    
+    Compression rules:
+    - `read` → "[Read: X bytes, Y lines — consumed]"
+    - `exec` → keep first 3 + last 3 lines, omit middle
+    - `web_fetch` → "[Web fetch: X bytes — consumed]"
+    - `comb_recall` / `comb_stage` → preserved intact
+    - Other tools > 2000 chars → truncate with summary
+    - Results ≤ COMPRESS_THRESHOLD → preserved
+    
+    Args:
+        messages: Current message list (mutated in place for efficiency)
+        current_iteration: Current iteration number (1-indexed)
+    
+    Returns:
+        The messages list (same reference, mutated)
+    """
+    if current_iteration <= 1:
+        return messages  # Nothing to compress on first iteration
+    
+    # Find the boundary: we want to compress tool results that appeared
+    # BEFORE the most recent assistant→tool cycle.
+    # Walk backwards to find the last assistant message with tool_calls
+    last_tc_idx = -1
+    for i in range(len(messages) - 1, -1, -1):
+        if messages[i].role == "assistant" and messages[i].tool_calls:
+            last_tc_idx = i
+            break
+    
+    if last_tc_idx < 0:
+        return messages  # No tool calls found
+    
+    # Compress all tool results BEFORE last_tc_idx
+    for i in range(last_tc_idx):
+        msg = messages[i]
+        if msg.role != "tool" or not msg.content:
+            continue
+        
+        content = msg.content
+        if len(content) <= COMPRESS_THRESHOLD:
+            continue
+        
+        tool_name = msg.name or ""
+        
+        # Preserved tools — never compress
+        if tool_name in PRESERVED_TOOLS:
+            continue
+        
+        # Compress based on tool type
+        if tool_name == "read":
+            lines = content.count("\n") + 1
+            messages[i] = ChatMessage(
+                role="tool",
+                content=f"[Read: {len(content)} bytes, {lines} lines — consumed]",
+                tool_call_id=msg.tool_call_id,
+                name=msg.name,
+            )
+        elif tool_name == "exec":
+            lines = content.split("\n")
+            if len(lines) > 8:
+                head = "\n".join(lines[:3])
+                tail = "\n".join(lines[-3:])
+                omitted = len(lines) - 6
+                messages[i] = ChatMessage(
+                    role="tool",
+                    content=f"{head}\n... [{omitted} lines omitted] ...\n{tail}",
+                    tool_call_id=msg.tool_call_id,
+                    name=msg.name,
+                )
+        elif tool_name == "web_fetch":
+            messages[i] = ChatMessage(
+                role="tool",
+                content=f"[Web fetch: {len(content)} bytes — consumed]",
+                tool_call_id=msg.tool_call_id,
+                name=msg.name,
+            )
+        elif len(content) > 2000:
+            # Generic large result — truncate
+            messages[i] = ChatMessage(
+                role="tool",
+                content=f"{content[:500]}\n... [{len(content) - 500} chars truncated — consumed]",
+                tool_call_id=msg.tool_call_id,
+                name=msg.name,
+            )
+    
+    return messages
+
+
+# ── Layer 3: Smart Archive Summary ──────────────────────────────
+# When messages are compacted/archived, extract a summary of what
+# happened so context retains key info after compaction.
+
+def extract_archive_summary(messages: list[ChatMessage]) -> str:
+    """Extract a compact summary from messages being archived.
+    
+    Captures:
+    - Files read/written
+    - Commands run
+    - Tools used (with counts)
+    - Key assistant findings (first sentence of text responses)
+    
+    Returns a summary string suitable for injection as a system message.
+    """
+    files_read = []
+    files_written = []
+    commands_run = []
+    tools_used: dict[str, int] = {}
+    key_findings = []
+    
+    for msg in messages:
+        if msg.role == "tool" and msg.name:
+            # Count tool usage
+            tools_used[msg.name] = tools_used.get(msg.name, 0) + 1
+        
+        if msg.role == "assistant" and msg.tool_calls:
+            for tc in msg.tool_calls:
+                fn = tc.get("function", {})
+                name = fn.get("name", "")
+                args_raw = fn.get("arguments", "")
+                
+                # Parse arguments safely
+                if isinstance(args_raw, str):
+                    try:
+                        import json
+                        args = json.loads(args_raw) if args_raw else {}
+                    except (json.JSONDecodeError, ValueError):
+                        args = {}
+                elif isinstance(args_raw, dict):
+                    args = args_raw
+                else:
+                    args = {}
+                
+                if name == "read" and "path" in args:
+                    files_read.append(args["path"])
+                elif name in ("write", "edit") and "path" in args:
+                    files_written.append(args["path"])
+                elif name == "exec" and "command" in args:
+                    cmd = args["command"]
+                    if len(cmd) > 80:
+                        cmd = cmd[:77] + "..."
+                    commands_run.append(cmd)
+        
+        # Extract key findings from assistant text responses
+        if msg.role == "assistant" and msg.content and not msg.tool_calls:
+            text = msg.content.strip()
+            if text and len(text) > 10:
+                # First sentence or first 150 chars
+                first_sentence = text.split(". ")[0]
+                if len(first_sentence) > 150:
+                    first_sentence = first_sentence[:147] + "..."
+                key_findings.append(first_sentence)
+    
+    # Build summary
+    parts = ["[Archive Summary — prior context was compacted]"]
+    
+    if files_read:
+        # Deduplicate, keep order
+        seen = set()
+        unique = [f for f in files_read if f not in seen and not seen.add(f)]
+        parts.append(f"Files read: {', '.join(unique[:15])}")
+    
+    if files_written:
+        seen = set()
+        unique = [f for f in files_written if f not in seen and not seen.add(f)]
+        parts.append(f"Files written: {', '.join(unique[:10])}")
+    
+    if commands_run:
+        parts.append(f"Commands run ({len(commands_run)}): {'; '.join(commands_run[:8])}")
+    
+    if tools_used:
+        tool_summary = ", ".join(f"{k}×{v}" for k, v in sorted(tools_used.items(), key=lambda x: -x[1])[:10])
+        parts.append(f"Tools used: {tool_summary}")
+    
+    if key_findings:
+        parts.append(f"Key findings: {' | '.join(key_findings[:5])}")
+    
+    return "\n".join(parts)
+
+
 def build_system_prompt(
     persona_name: str,
     persona_prompt: str = "",

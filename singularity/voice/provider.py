@@ -106,7 +106,7 @@ class ChatProvider(ABC):
         messages: list[ChatMessage],
         tools: Optional[list[dict]] = None,
         temperature: float = 0.7,
-        max_tokens: int = 8192,
+        max_tokens: int = 16384,
         **kwargs,
     ) -> AsyncIterator[StreamChunk]:
         """Stream a chat completion. Yields StreamChunks."""
@@ -117,7 +117,7 @@ class ChatProvider(ABC):
         messages: list[ChatMessage],
         tools: Optional[list[dict]] = None,
         temperature: float = 0.7,
-        max_tokens: int = 8192,
+        max_tokens: int = 16384,
         **kwargs,
     ) -> ChatResponse:
         """Non-streaming chat. Collects stream into a single response."""

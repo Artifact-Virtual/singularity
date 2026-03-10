@@ -222,7 +222,7 @@ class CopilotProxyProvider(ChatProvider):
         messages: list[ChatMessage],
         tools: Optional[list[dict]] = None,
         temperature: float = 0.7,
-        max_tokens: int = 8192,
+        max_tokens: int = 16384,
         **kwargs,
     ) -> AsyncIterator[StreamChunk]:
         """Stream a chat completion via Copilot's OpenAI-compatible API."""

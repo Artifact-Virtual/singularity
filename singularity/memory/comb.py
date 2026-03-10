@@ -149,8 +149,8 @@ class CombMemory:
                     s.connect(str(sock_path))
                     s.sendall(b'{"cmd": "reload"}\n')
                     s.close()
-                except Exception:
-                    pass  # Daemon not running — entries stay queued
+                except Exception as e:
+                    logger.debug(f"Suppressed: {e}")
                     
         except Exception as e:
             logger.warning("HEKTOR queue failed (non-fatal): %s", e)

@@ -73,7 +73,7 @@ class ProviderChain:
         messages: list[ChatMessage],
         tools: Optional[list[dict]] = None,
         temperature: float = 0.7,
-        max_tokens: int = 8192,
+        max_tokens: int = 16384,
         **kwargs,
     ) -> ChatResponse:
         """Chat with automatic fallback through the provider chain.
@@ -148,7 +148,7 @@ class ProviderChain:
         messages: list[ChatMessage],
         tools: Optional[list[dict]] = None,
         temperature: float = 0.7,
-        max_tokens: int = 8192,
+        max_tokens: int = 16384,
         **kwargs,
     ) -> AsyncIterator[StreamChunk]:
         """Stream with fallback. Only falls back before first chunk."""

@@ -35,6 +35,7 @@ from ..voice.chain import ProviderChain
 from ..sinew.executor import ToolExecutor
 from ..sinew.definitions import TOOL_DEFINITIONS
 from .blink import BlinkController
+from .context import compress_tool_results
 
 logger = logging.getLogger("singularity.cortex.agent")
 
@@ -135,6 +136,10 @@ class AgentLoop:
                         self.blink.notify_cap_expanded(old_max, self._max_iterations)
                 
                 # ── THINK: Send to LLM ───────────────────────────
+                
+                # ── Layer 2: Compress old tool results ───────────
+                if self._iteration > 1:
+                    compress_tool_results(messages, self._iteration)
                 
                 # ── BLINK: Inject preparation if approaching boundary ──
                 if self.blink:
