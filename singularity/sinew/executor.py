@@ -265,7 +265,7 @@ class ToolExecutor:
         if not p.is_absolute():
             p = self.workspace / p
         
-        violation = validate_path(str(p))
+        violation = validate_path(str(p), write=True)
         if violation:
             return f"Blocked: {violation}"
         
@@ -290,7 +290,7 @@ class ToolExecutor:
         if not p.is_absolute():
             p = self.workspace / p
         
-        violation = validate_path(str(p))
+        violation = validate_path(str(p), write=True)
         if violation:
             return f"Blocked: {violation}"
         
