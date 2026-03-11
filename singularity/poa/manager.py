@@ -170,7 +170,42 @@ class POAConfig:
 
     @classmethod
     def load(cls, path: Path) -> "POAConfig":
-        return cls.from_dict(json.loads(path.read_text()))
+        """Load a POAConfig from a .json or .yaml file, normalising fields."""
+        raw = path.read_text()
+        if path.suffix in (".yaml", ".yml"):
+            import yaml as _yaml
+            d = _yaml.safe_load(raw)
+            # Normalise YAML field names → POAConfig schema
+            d = cls._normalise_yaml(d, path)
+        else:
+            d = json.loads(raw)
+        return cls.from_dict(d)
+
+    @classmethod
+    def _normalise_yaml(cls, d: dict, path: Path) -> dict:
+        """Map YAML config fields to POAConfig schema fields."""
+        out = dict(d)
+        # product_name: use 'name' if 'product_name' absent
+        if "product_name" not in out:
+            out["product_name"] = out.pop("name", path.parent.name)
+        # product_id: use dir name if absent
+        if "product_id" not in out:
+            out["product_id"] = path.parent.name
+        # endpoints: normalise list of dicts
+        raw_endpoints = out.get("endpoints", [])
+        normalised = []
+        for ep in raw_endpoints:
+            if isinstance(ep, dict):
+                normalised.append({
+                    "url": ep.get("url", ""),
+                    "name": ep.get("name", ep.get("url", "")),
+                    "method": ep.get("method", "GET"),
+                    "expected_status": ep.get("expected_status", 200),
+                    "timeout_seconds": ep.get("timeout", ep.get("timeout_seconds", 5)),
+                })
+        out["endpoints"] = normalised
+        # strip keys not in POAConfig schema (checks, service, journal, release, etc.)
+        return out
 
 
 class POAManager:
@@ -202,13 +237,25 @@ class POAManager:
         self._load_all()
 
     def _load_all(self) -> None:
-        """Load all POA configs from disk."""
-        for f in self.poa_dir.glob("*/config.json"):
-            try:
-                config = POAConfig.load(f)
-                self._configs[config.product_id] = config
-            except Exception as e:
-                logger.error(f"Failed to load POA config {f}: {e}")
+        """Load all POA configs from disk (json or yaml)."""
+        seen: set[str] = set()
+        # Prefer .json over .yaml if both exist
+        for pattern in ("*/config.json", "*/config.yaml", "*/config.yml"):
+            for f in self.poa_dir.glob(pattern):
+                product_dir = f.parent.name
+                if product_dir in seen:
+                    continue  # already loaded json version
+                try:
+                    config = POAConfig.load(f)
+                    self._configs[config.product_id] = config
+                    seen.add(product_dir)
+                    # Migrate yaml → json so future loads are native
+                    if f.suffix in (".yaml", ".yml"):
+                        json_path = f.parent / "config.json"
+                        config.save(json_path)
+                        logger.info(f"POA migrated yaml→json: {config.product_id}")
+                except Exception as e:
+                    logger.error(f"Failed to load POA config {f}: {e}")
 
     def propose(
         self,
