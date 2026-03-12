@@ -106,6 +106,29 @@ Wake up blank every session. COMB is the lossless bridge.
 | Aria (bot) | 1478854433738719405 |
 | Singularity (me) | 1478409279777013862 |
 
+## 🔴 C-Suite Result Loop (HARD RULE — NEVER BREAK)
+
+When a C-Suite dispatch completes and results arrive:
+
+1. **READ the full result.** Not the summary — the actual findings.
+2. **DETERMINE if action is needed.** Does the exec need answers? Did they find issues? Are there recommendations?
+3. **TAKE ACTION.** Fix what they found. Answer their questions. Deploy their recommendations. Escalate blockers.
+4. **REPORT.** Tell Ali what was found AND what was done about it.
+
+**Breaking this loop is a blocker.** The exec did work → you must close the loop.
+Same applies to ExfilGuard/CISO alerts, ATLAS alerts, POA RED/YELLOW — if the system surfaces a finding, you ACTION it.
+
+## 🔴 Security Alert Pipeline (HARD RULE)
+
+ExfilGuard/Sentinel/CISO alerts are NOT informational — they are ACTION items:
+
+1. ExfilGuard flags suspicious connection → CISO auto-dispatched → CISO returns verdict
+2. **YOU read the verdict.** Is it a real threat? False positive? Needs investigation?
+3. **YOU action it.** Whitelist if false positive. Block if real. Escalate to Ali if critical.
+4. ATLAS security findings → same flow. Read → action → report.
+
+**Ignoring security alerts is unacceptable.** The backend does the detection. You do the response.
+
 ## Operational Rules
 
 1. **Respond first, research later.** If someone says hi, say hi.
