@@ -516,7 +516,7 @@ class DiscordAdapter(BaseAdapter):
         )
 
     async def _resolve_channel(self, chat_id: str):
-        """Resolve a channel by ID, with caching."""
+        """Resolve a channel by ID, with caching. Supports guild channels and DMs."""
         if not self._client:
             return None
         int_id = int(chat_id)
@@ -525,17 +525,33 @@ class DiscordAdapter(BaseAdapter):
         if cached is not None:
             return cached
         try:
+            # Try guild channel first (fast path — no API call)
             channel = self._client.get_channel(int_id)
             if channel and hasattr(channel, "send"):
                 self._channel_cache[int_id] = channel
                 return channel
-            # Try fetching (API call)
-            channel = await self._client.fetch_channel(int_id)
-            if channel and hasattr(channel, "send"):
-                self._channel_cache[int_id] = channel
-                return channel
+            # Try fetching guild channel via API
+            try:
+                channel = await self._client.fetch_channel(int_id)
+                if channel and hasattr(channel, "send"):
+                    self._channel_cache[int_id] = channel
+                    return channel
+            except Exception:
+                pass
+            # fetch_channel fails for DM channels — try creating a DM via user ID
+            # If the chat_id looks like a user snowflake, open a DM channel
+            try:
+                user = await self._client.fetch_user(int_id)
+                if user:
+                    dm_channel = await user.create_dm()
+                    if dm_channel and hasattr(dm_channel, "send"):
+                        self._channel_cache[int_id] = dm_channel
+                        logger.info("[%s] Resolved DM channel for user %s", self._id, int_id)
+                        return dm_channel
+            except Exception as e:
+                logger.debug("[%s] DM resolve failed for %s: %s", self._id, int_id, e)
         except Exception as e:
-            logger.debug(f"Suppressed: {e}")
+            logger.error("[%s] _resolve_channel error for %s: %s", self._id, int_id, e)
         return None
 
     # ── Platform Actions ─────────────────────────────────────────────
