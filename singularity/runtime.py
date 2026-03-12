@@ -783,8 +783,6 @@ class Runtime:
             @self.bus.on("atlas.alert")
             async def on_atlas_alert(event):
                 try:
-                    if not (self.tools and self.tools._discord_adapter):
-                        return
                     data = event.data if hasattr(event, 'data') else event
                     if not isinstance(data, dict):
                         return
@@ -803,9 +801,35 @@ class Runtime:
                     msg = "\n".join(lines)
                     if len(msg) > 1900:
                         msg = msg[:1900] + "\n... (truncated)"
-                    await self.tools._discord_adapter.send(
-                        ATLAS_CHANNEL, OutboundMessage(content=msg)
-                    )
+
+                    # Inject HIGH/CRITICAL alerts directly into cortex for action
+                    critical_issues = [i for i in issues if i.get("severity", "").upper() in ("HIGH", "CRITICAL", "ERROR")]
+                    if critical_issues and self.cortex:
+                        try:
+                            issue_detail = "\n".join(
+                                f"[{i.get('severity','?').upper()}] {i.get('title','?')} — Module: {i.get('module','?')} — {i.get('description','')}"
+                                for i in critical_issues[:5]
+                            )
+                            _atlas_cortex_msg = (
+                                f"ATLAS ALERT — {len(critical_issues)} critical/high issue(s) detected:\n\n"
+                                f"{issue_detail}\n\n"
+                                f"REQUIRED: Investigate these issues. Take corrective action where possible. Report to Ali."
+                            )
+                            asyncio.create_task(self.cortex.process(
+                                session_id=f"atlas-alert-{count}",
+                                message=_atlas_cortex_msg,
+                                source=type("_src", (), {"channel_type": "internal", "sender_id": "system", "sender_name": "ATLAS"})(),
+                                sender_name="ATLAS",
+                            ))
+                            logger.info(f"ATLAS: {len(critical_issues)} critical alerts injected into cortex")
+                        except Exception as _ae:
+                            logger.error(f"ATLAS cortex injection failed: {_ae}")
+
+                    # Post to Discord for visibility
+                    if self.tools and self.tools._discord_adapter:
+                        await self.tools._discord_adapter.send(
+                            ATLAS_CHANNEL, OutboundMessage(content=msg)
+                        )
                 except Exception as e:
                     logger.error(f"ATLAS alert forwarding FAILED: {e}")
 
@@ -1602,31 +1626,54 @@ class Runtime:
             data = event.data if hasattr(event, "data") else event
             dispatch_id = data.get("dispatch_id", "?")[:8]
             tasks = data.get("tasks", [])
-            
-            lines = [f"📋 **C-Suite Dispatch {dispatch_id} Complete**"]
+
+            # Build full result prompt for cortex
+            lines = [f"C-Suite Dispatch {dispatch_id} complete. Results require your review and action:"]
             for t in tasks:
                 role = t.get("role", "?").upper()
                 status = t.get("status", "?")
                 icon = "✅" if status in ("completed", "success") else "❌" if status == "failed" else "⏱️"
                 dur = t.get("duration_seconds", 0)
-                result_preview = str(t.get("result", ""))[:300]
-                lines.append(f"{icon} **{role}** ({dur:.0f}s) — {result_preview}")
-            
-            msg = "\n".join(lines)
-            logger.info(msg)
-            
-            # Post to #bridge channel
+                result_full = str(t.get("result", "")).strip()
+                lines.append(f"\n{icon} {role} ({dur:.0f}s):\n{result_full}")
+
+            cortex_prompt = "\n".join(lines)
+            cortex_prompt += "\n\nREQUIRED: Read the above executive results. Determine if any action, fix, or follow-up is needed. If yes, take it now. Report outcome to Ali in #bridge."
+
+            logger.info(f"C-Suite dispatch {dispatch_id} completed — injecting directly into cortex")
+
+            # PRIMARY: inject directly into cortex agent loop (no Discord round-trip)
+            if self.cortex:
+                try:
+                    asyncio.create_task(self.cortex.process(
+                        session_id=f"csuite-dispatch-{dispatch_id}",
+                        message=cortex_prompt,
+                        source=type("src", (), {"channel_type": "internal", "sender_id": "system", "sender_name": "C-Suite"})(),
+                        sender_name="C-Suite",
+                    ))
+                    logger.info(f"Dispatch {dispatch_id} injected into cortex successfully")
+                except Exception as e:
+                    logger.error(f"Cortex injection failed for dispatch {dispatch_id}: {e}")
+
+            # SECONDARY: post summary to #bridge for visibility
             bridge_channel = "1478716092992979035"
             if "discord" in self.adapters:
                 from .nerve.types import OutboundMessage
                 try:
-                    # Mention Singularity bot so the agent loop picks it up
+                    summary_lines = [f"📋 **C-Suite Dispatch {dispatch_id} Complete** — processing now"]
+                    for t in tasks:
+                        role = t.get("role", "?").upper()
+                        status = t.get("status", "?")
+                        icon = "✅" if status in ("completed", "success") else "❌" if status == "failed" else "⏱️"
+                        dur = t.get("duration_seconds", 0)
+                        preview = str(t.get("result", ""))[:300]
+                        summary_lines.append(f"{icon} **{role}** ({dur:.0f}s) — {preview}")
                     await self.adapters["discord"].send(
                         bridge_channel,
-                        OutboundMessage(content=f"<@1478409279777013862>\n{msg}"),
+                        OutboundMessage(content="\n".join(summary_lines)),
                     )
                 except Exception as e:
-                    logger.error(f"Dispatch result delivery failed: {e}")
+                    logger.error(f"Dispatch result bridge post failed: {e}")
         
         # C-Suite escalation → alert channel
         @self.bus.on("csuite.escalation.to_ava")
@@ -1879,23 +1926,44 @@ class Runtime:
                                         )
                                         logger.info(f"ExfilGuard: CISO investigation complete — succeeded: {ciso_result.all_succeeded}, tasks: {len(ciso_result.tasks)}")
                                         
-                                        # Post CISO verdict to #dispatch mentioning @Singularity
+                                        # Post CISO verdict to #dispatch + inject into cortex for action
                                         ciso_response = ciso_result.tasks[0].response if ciso_result.tasks else ""
-                                        if ciso_result.all_succeeded and ciso_response and self.adapters.get("discord"):
+                                        if ciso_result.all_succeeded and ciso_response:
                                             # Build concise dispatch message
                                             verdict_msg = (
                                                 f"🛡️ **CISO Security Report** — ExfilGuard {severity}\n"
                                                 f"**IP:** {payload.get('ip', '?')} | **rDNS:** {payload.get('rdns', '?')}\n"
                                                 f"**Process:** {payload.get('process', '?')}\n\n"
-                                                f"{ciso_response[:1800]}\n\n"
-                                                f"<@{getattr(self.config, 'bot_user_id', '1478396689642688634')}>"  # @Singularity
+                                                f"{ciso_response[:1800]}"
                                             )
-                                            dispatch_channel = "1478716096667189292"  # #dispatch
-                                            await self.adapters["discord"].send(
-                                                dispatch_channel,
-                                                OutboundMessage(content=verdict_msg)
-                                            )
-                                            logger.info("ExfilGuard: CISO verdict posted to #dispatch")
+
+                                            # PRIMARY: inject into cortex for action
+                                            if self.cortex:
+                                                try:
+                                                    _ciso_cortex_msg = (
+                                                        f"SECURITY ALERT — ExfilGuard detected {severity} event.\n"
+                                                        f"IP: {payload.get('ip', '?')} | rDNS: {payload.get('rdns', '?')} | Process: {payload.get('process', '?')}\n\n"
+                                                        f"CISO Report:\n{ciso_response[:2000]}\n\n"
+                                                        f"REQUIRED: Review this security finding. Take any needed action (block IP, investigate further, whitelist if false positive, escalate). Report outcome to Ali."
+                                                    )
+                                                    asyncio.create_task(self.cortex.process(
+                                                        session_id=f"exfil-ciso-{payload.get('ip','unknown').replace('.', '-')}",
+                                                        message=_ciso_cortex_msg,
+                                                        source=type("_src", (), {"channel_type": "internal", "sender_id": "system", "sender_name": "ExfilGuard"})(),
+                                                        sender_name="ExfilGuard",
+                                                    ))
+                                                    logger.info(f"ExfilGuard: CISO verdict injected into cortex for action")
+                                                except Exception as _ce:
+                                                    logger.error(f"ExfilGuard cortex injection failed: {_ce}")
+
+                                            # SECONDARY: post to #dispatch for visibility
+                                            if self.adapters.get("discord"):
+                                                dispatch_channel = "1478716096667189292"  # #dispatch
+                                                await self.adapters["discord"].send(
+                                                    dispatch_channel,
+                                                    OutboundMessage(content=verdict_msg)
+                                                )
+                                                logger.info("ExfilGuard: CISO verdict posted to #dispatch")
                                         
                                         # Feed findings back to ATLAS as a security issue
                                         if self.atlas:
