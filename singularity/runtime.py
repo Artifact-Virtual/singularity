@@ -1712,6 +1712,21 @@ class Runtime:
                                 
                                 # Auto-dispatch CISO for threat investigation
                                 if self.dispatcher:
+                                    # Run CISO Scanner Suite (targeted scan) FIRST
+                                    scanner_evidence = ""
+                                    try:
+                                        import sys
+                                        if "/home/adam/workspace" not in sys.path:
+                                            sys.path.insert(0, "/home/adam/workspace")
+                                        from poa.sentinel.ciso.orchestrator import CISOOrchestrator
+                                        ciso_scanner = CISOOrchestrator()
+                                        scan_report = ciso_scanner.run_targeted(payload)
+                                        scanner_evidence = ciso_scanner.format_for_ciso(scan_report)
+                                        logger.info(f"ExfilGuard: CISO scanner completed — threat_score={scan_report['threat_score']}, findings={scan_report['total_findings']}, elapsed={scan_report['elapsed_seconds']}s")
+                                    except Exception as scan_err:
+                                        logger.error(f"ExfilGuard: CISO scanner failed: {scan_err}")
+                                        scanner_evidence = f"[Scanner unavailable: {scan_err}]"
+                                    
                                     hunt_directive = (
                                         f"SECURITY INCIDENT — ExfilGuard {severity} alert.\n"
                                         f"Type: {payload.get('type', 'unknown')}\n"
@@ -1722,21 +1737,9 @@ class Runtime:
                                         f"Cmdline: {payload.get('cmdline', 'unknown')}\n"
                                         f"Parent Process: {payload.get('parent_process', 'unknown')}\n"
                                         f"User: {payload.get('user', 'unknown')}\n"
-                                        f"Local: {payload.get('local', 'unknown')}\n"
                                         f"Timestamp: {event.get('timestamp', 'unknown')}\n\n"
-                                        f"INVESTIGATION PROTOCOL (use exec tool):\n"
-                                        f"1. Run `nmap -sV -sC {payload.get('ip', '')}` to fingerprint the remote host\n"
-                                        f"2. Run `curl -sI http://{payload.get('ip', '')}` and `curl -sI https://{payload.get('ip', '')}` to check HTTP services\n"
-                                        f"3. Run `whois {payload.get('ip', '')}` for registration data\n"
-                                        f"4. Check `ss -tunap | grep {payload.get('ip', '')}` for active connections\n"
-                                        f"5. Check ExfilGuard alert history: `grep '{payload.get('ip', '')}' /home/adam/workspace/poa/sentinel/logs/alerts.jsonl | tail -5`\n"
-                                        f"6. If process is 'http' — check if it's apt: `ls -la /usr/lib/apt/methods/http`\n"
-                                        f"7. Cross-reference with Kali mirror list if HTTP on port 80\n\n"
-                                        f"VERDICT REQUIRED:\n"
-                                        f"- FALSE POSITIVE or GENUINE THREAT (with confidence %)\n"
-                                        f"- If false positive: what whitelist entry should be added\n"
-                                        f"- If genuine: recommended containment actions\n"
-                                        f"- Keep it concise — 20 lines max for the verdict"
+                                        f"PRE-COMPUTED SCANNER EVIDENCE:\n"
+                                        f"{scanner_evidence}\n"
                                     )
                                     try:
                                         # CISO investigates IMMEDIATELY — not queued
