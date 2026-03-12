@@ -394,10 +394,7 @@ class CopilotProxyProvider(ChatProvider):
                     yield chunk
             
             if chunk_count == 0:
-                err = RuntimeError(f"Proxy returned 200 but 0 chunks — silent failure. Messages: {len(messages)}, model: {body.get('model')}")
-                logger.warning(str(err))
-                self.record_failure(err)
-                raise err
+                logger.warning(f"Proxy returned 200 but 0 chunks — possible silent failure. Messages: {len(messages)}, model: {body.get('model')}")
             
             self.record_success()
         except Exception as e:
