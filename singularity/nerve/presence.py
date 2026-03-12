@@ -4,8 +4,8 @@
 # Shows what Singularity is actually doing during a turn:
 # thinking, reading, writing, searching, executing, etc.
 #
-# Ported and adapted from Mach6 presence.py (AVA/Aria architecture)
-# by Aria Shakil — 2026-03-06
+# Ported and adapted from Mach6 presence.py
+# 2026-03-06
 
 import asyncio
 import logging

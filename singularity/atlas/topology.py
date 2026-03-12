@@ -23,7 +23,7 @@ logger = logging.getLogger("singularity.atlas.topology")
 # ── Enums ────────────────────────────────────────────────────
 
 class ModuleType(str, Enum):
-    AGENT = "agent"                    # Singularity, AVA, Aria, Scarlet
+    AGENT = "agent"                    # Singularity, AVA, Scarlet
     GATEWAY = "gateway"                # Mach6 Gateway, Copilot Proxy
     SERVICE = "service"                # COMB Cloud, Mach6 Cloud, ERP, GDI
     DAEMON = "daemon"                  # Cthulu, HEKTOR, Sentinel

@@ -189,6 +189,13 @@ class CopilotProxy:
 
         body = await request.json()
         stream = body.get("stream", False)
+        msg_count = len(body.get("messages", []))
+        model = body.get("model", "unknown")
+        has_tools = bool(body.get("tools"))
+        
+        # Log request metadata
+        total_chars = sum(len(m.get("content", "") or "") for m in body.get("messages", []))
+        print(f"[PROXY:{self.port}] REQ model={model} msgs={msg_count} chars={total_chars} tools={has_tools} stream={stream}", file=sys.stderr)
 
         # Safeguard: Copilot API rejects conversations ending with assistant messages
         # Strip trailing assistant messages before forwarding
@@ -229,16 +236,22 @@ class CopilotProxy:
                 ) as resp:
                     if resp.status_code != 200:
                         error_body = await resp.aread()
+                        print(f"[PROXY:{self.port}] UPSTREAM ERROR {resp.status_code}: {error_body.decode()[:500]}", file=sys.stderr)
                         await response.write(
                             f"data: {json.dumps({'error': error_body.decode()})}\n\n".encode()
                         )
                         return response
 
+                    line_count = 0
                     try:
                         async for line in resp.aiter_lines():
+                            line_count += 1
                             await response.write(f"{line}\n".encode())
                     except (ConnectionResetError, ConnectionError, BrokenPipeError, ClientConnectionResetError) as e:
-                        pass  # Client disconnected mid-stream — normal, not fatal
+                        print(f"[PROXY:{self.port}] Client disconnected after {line_count} lines: {type(e).__name__}", file=sys.stderr)
+                    
+                    if line_count == 0:
+                        print(f"[PROXY:{self.port}] WARNING: 0 lines from upstream (model={model} msgs={msg_count})", file=sys.stderr)
 
                 return response
             else:

@@ -347,14 +347,14 @@ class Runtime:
         vc = self.config.voice
         providers = []
         
-        # Copilot proxy (primary)
+        # Copilot proxy (primary — GitHub Copilot API)
         proxy = CopilotProxyProvider(
             endpoint=vc.proxy.base_url,
             model=vc.primary_model,
         )
         providers.append(proxy)
         
-        # Ollama (fallback)
+        # Ollama (fallback — local models)
         if vc.ollama.enabled:
             ollama = OllamaProvider(
                 endpoint=vc.ollama.base_url,
@@ -444,12 +444,14 @@ class Runtime:
         exec_model = self.config.csuite.executive_model
         exec_providers = []
         
+        # Copilot proxy (primary)
         exec_proxy = CopilotProxyProvider(
             endpoint=vc.proxy.base_url,
             model=exec_model,
         )
         exec_providers.append(exec_proxy)
         
+        # Ollama fallback (local)
         if vc.ollama.enabled:
             exec_ollama = OllamaProvider(
                 endpoint=vc.ollama.base_url,

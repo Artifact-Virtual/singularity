@@ -56,15 +56,6 @@ KNOWN_MODULES: dict[str, dict[str, Any]] = {
         "aliases": ["ava", "symbiote", "mach6", "symbiote-gateway"],
         "display_name": "Symbiote Gateway",
     },
-    "aria": {
-        "type": ModuleType.AGENT,
-        "service": "aria",
-        "ports": [3007, 3010],
-        "health": None,
-        "config": "/opt/aria/mach6.json",
-        "deps": ["copilot-proxy", "discord-api"],
-        "aliases": ["aria-gateway"],
-    },
     "scarlet": {
         "type": ModuleType.AGENT,
         "machine": "victus",
@@ -174,7 +165,7 @@ KNOWN_MODULES: dict[str, dict[str, Any]] = {
 # Classify unknown services by pattern
 SERVICE_PATTERNS: list[tuple[str, ModuleType]] = [
     (r"mach6|gateway|daemon\.js", ModuleType.GATEWAY),
-    (r"singularity|aria|scarlet|ava", ModuleType.AGENT),
+    (r"singularity|scarlet|ava", ModuleType.AGENT),
     (r"sentinel|exfil|openant", ModuleType.DAEMON),
     (r"nginx|cloudflare|postgres|redis|ollama|surreal", ModuleType.INFRASTRUCTURE),
     (r"erp|gdi|comb|social|cloud", ModuleType.SERVICE),
@@ -730,8 +721,7 @@ class DiscoveryEngine:
             return "singularity"
         if "/opt/ava/" in cmd_lower or "mach6.json" in cmd_lower:
             return "symbiote-gateway"
-        if "/opt/aria/" in cmd_lower or "aria" in cmd_lower:
-            return "aria"
+
         if "artifact-erp" in cmd_lower or "artifact_erp" in cmd_lower or "business_erp" in cmd_lower:
             return "artifact-erp"
         if "http_api" in cmd_lower and "singularity" in cmd_lower:

@@ -24,7 +24,7 @@ from ..voice.provider import ChatMessage
 logger = logging.getLogger("singularity.cortex.context")
 
 # Default token budgets (conservative — leaves room for response)
-DEFAULT_CONTEXT_BUDGET = 180_000  # Max tokens for context
+DEFAULT_CONTEXT_BUDGET = 120_000  # Max tokens for context (Copilot limit: 128K prompt tokens)
 SYSTEM_PROMPT_BUDGET = 10_000     # Reserved for system prompt
 RESPONSE_BUDGET = 8_192           # Reserved for response
 
@@ -467,6 +467,11 @@ def build_system_prompt(
         parts.append(f"## Available Tools\n{tools_description}")
     
     if comb_context:
+        # Cap COMB to prevent system prompt from exceeding model context limits
+        # 290K chars of COMB = ~72K tokens, which alone exceeds Copilot's 128K limit
+        MAX_COMB_CHARS = 20_000  # ~5K tokens — enough for recent operational context
+        if len(comb_context) > MAX_COMB_CHARS:
+            comb_context = comb_context[:MAX_COMB_CHARS] + f"\n\n[... truncated — {len(comb_context) - MAX_COMB_CHARS} chars omitted]"
         parts.append(
             f"## Operational Memory (COMB Recall)\n"
             f"The following is your recalled persistent memory from previous sessions. "
