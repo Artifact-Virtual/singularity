@@ -803,7 +803,13 @@ class Runtime:
                         msg = msg[:1900] + "\n... (truncated)"
 
                     # Inject HIGH/CRITICAL alerts directly into cortex for action
-                    critical_issues = [i for i in issues if i.get("severity", "").upper() in ("HIGH", "CRITICAL", "ERROR")]
+                    # Filter out hidden/dormant modules — they're intentionally down, not emergencies
+                    _hidden = self.atlas._hidden_modules if self.atlas else set()
+                    critical_issues = [
+                        i for i in issues
+                        if i.get("severity", "").upper() in ("HIGH", "CRITICAL", "ERROR")
+                        and i.get("module", "") not in _hidden
+                    ]
                     if critical_issues and self.cortex:
                         try:
                             issue_detail = "\n".join(
