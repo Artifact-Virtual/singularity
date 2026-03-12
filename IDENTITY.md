@@ -47,7 +47,7 @@
 | Singularity runtime | Discord + :8450 | ✅ systemd |
 | Copilot Proxy (LLM) | :3000 | ✅ systemd |
 | COMB Cloud | :8420 / :8700-8701 | ✅ systemd |
-| Mach6 Gateway (AVA) | :3006/:3009 | ✅ systemd |
+| Symbiote Gateway (AVA) | :3006/:3009 | ✅ systemd |
 | Aria Gateway | :3007/:3010 | ✅ systemd |
 | Artifact ERP | :3100 / :8750 | ✅ systemd |
 | GDI Backend/Landing/Workers | :8600/:8601 | ✅ systemd |
@@ -70,12 +70,12 @@
 | gladius-three.vercel.app | GLADIUS |
 
 ### POAs (Active)
-artifact-erp, gdi, comb-cloud, mach6-gateway, singularity, gladius — all monitored.
+artifact-erp, gdi, comb-cloud, symbiote-gateway, singularity, gladius — all monitored.
 
 ## Lineage
 
 - **Predecessor:** Plug (5,974 lines, monolith — taught what breaks)
-- **Sibling:** Mach6 (TypeScript, AVA's runtime — taught what works)
+- **Sibling:** Symbiote (TypeScript, AVA's runtime — taught what works)
 - **Builder:** AVA 🔮 | **Architect:** Ali
 
 ---

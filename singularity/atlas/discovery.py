@@ -53,7 +53,8 @@ KNOWN_MODULES: dict[str, dict[str, Any]] = {
         "health": None,
         "config": "/opt/ava/mach6.json",
         "deps": ["copilot-proxy", "discord-api", "hektor-daemon"],
-        "aliases": ["ava", "mach6"],
+        "aliases": ["ava", "symbiote", "mach6"],
+        "display_name": "Symbiote Gateway",
     },
     "aria": {
         "type": ModuleType.AGENT,
@@ -94,6 +95,7 @@ KNOWN_MODULES: dict[str, dict[str, Any]] = {
         "health": "http://localhost:8430/health",
         "public_urls": ["mach6.artifactvirtual.com", "mach6-api.artifactvirtual.com"],
         "deps": [],
+        "display_name": "Symbiote Cloud",
     },
     "artifact-erp": {
         "type": ModuleType.SERVICE,
