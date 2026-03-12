@@ -1,6 +1,6 @@
 # Singularity [AE] — Architecture Reference
 
-> **Obelisk**  
+> **Autonomous Enterprise Runtime**  
 > _Not a chatbot. An operating system for organizations._
 
 ---

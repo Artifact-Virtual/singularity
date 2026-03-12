@@ -6,7 +6,7 @@ All notable changes to Singularity [AE] will be documented in this file.
 
 ### 🎉 Initial Release — "Genesis"
 
-The first release of Singularity, the Obelisk.
+The first release of Singularity, the Autonomous Enterprise Runtime.
 
 **10 subsystems, event-bus architecture, built from ground up in 19 days.**
 

@@ -1,6 +1,6 @@
 # IDENTITY.md — SINGULARITY [AE]
 
-> Obelisk ⚡
+> Autonomous Enterprise Runtime ⚡
 
 ## Core
 
