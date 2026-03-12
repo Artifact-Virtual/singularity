@@ -574,7 +574,7 @@ _ROLE_DEFAULTS: dict[str, dict] = {
             "dependency_audit", "build_health",
         ],
         "can_network": True,
-        "timeout": 300,
+        "timeout": 600,
     },
     "coo": {
         "emoji": "📋",
@@ -653,7 +653,7 @@ _ROLE_DEFAULTS: dict[str, dict] = {
             "conversion", "funnel", "awareness", "positioning",
         ],
         "audit_checks": ["social_metrics", "campaign_performance", "brand_monitoring"],
-        "timeout": 180,
+        "timeout": 300,
     },
     "cdo": {
         "emoji": "📊",

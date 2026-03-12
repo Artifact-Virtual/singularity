@@ -347,11 +347,18 @@ class Coordinator:
             )
         except asyncio.TimeoutError:
             logger.warning(f"{executive.name} timed out on task {task.task_id} after {timeout}s")
+            # Capture partial progress from the executive instead of losing it
+            partial = executive.get_partial_progress()
             return TaskResult(
                 task_id=task.task_id,
                 role=role_type,
                 status=TaskStatus.TIMEOUT,
-                error=f"Task timed out after {timeout}s",
+                response=partial.get("response", ""),
+                findings=partial.get("findings", []),
+                actions=partial.get("actions", []),
+                files_modified=partial.get("files_modified", []),
+                iterations_used=partial.get("iterations", 0),
+                error=f"Task timed out after {timeout}s ({partial.get('iterations', 0)} iterations completed)",
                 duration_seconds=timeout,
             )
 

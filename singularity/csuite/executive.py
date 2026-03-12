@@ -131,6 +131,12 @@ class Executive:
         self._current_task: Optional[Task] = None
         self._task_history: list[TaskResult] = []
         self._task_history_max = 50
+        # Partial progress tracking — survives asyncio cancellation
+        self._partial_iterations: int = 0
+        self._partial_response: str = ""
+        self._partial_findings: list[str] = []
+        self._partial_actions: list[str] = []
+        self._partial_files: list[str] = []
 
         # Ensure workspace exists
         self.workspace.mkdir(parents=True, exist_ok=True)
@@ -142,6 +148,16 @@ class Executive:
     @property
     def is_busy(self) -> bool:
         return self._busy
+
+    def get_partial_progress(self) -> dict:
+        """Return partial progress from a running/timed-out task."""
+        return {
+            "iterations": self._partial_iterations,
+            "response": self._partial_response,
+            "findings": self._partial_findings,
+            "actions": self._partial_actions,
+            "files_modified": self._partial_files,
+        }
 
     @property
     def name(self) -> str:
@@ -180,6 +196,12 @@ class Executive:
         self._current_task = task
         start_time = time.time()
         iterations = 0
+        # Reset partial progress tracking
+        self._partial_iterations = 0
+        self._partial_response = ""
+        self._partial_findings = []
+        self._partial_actions = []
+        self._partial_files = []
 
         await self.bus.emit("csuite.task.started", {
             "role": self.role.role_type.value,
@@ -254,6 +276,9 @@ class Executive:
                 # If no tool calls, we're done — this is the final response
                 if not llm_response.tool_calls:
                     response_text = llm_response.content or ""
+                    # Sync partial progress before break
+                    self._partial_iterations = iterations
+                    self._partial_response = response_text
                     if not response_text:
                         # Empty response with no tool calls — could be a proxy silent failure
                         # Try once more before giving up
@@ -295,6 +320,13 @@ class Executive:
                         files_modified.append(tc_args["path"])
 
                     all_actions.append(f"{tc_name}: {self._summarize_args(tc_args)}")
+
+                # Sync partial progress — survives asyncio cancellation
+                self._partial_iterations = iterations
+                self._partial_response = response_text
+                self._partial_findings = list(all_findings) if all_findings else []
+                self._partial_actions = list(all_actions)
+                self._partial_files = list(files_modified)
 
             # Determine status
             elapsed = time.time() - start_time
