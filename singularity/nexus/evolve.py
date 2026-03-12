@@ -249,8 +249,21 @@ class EvolutionEngine:
             if not isinstance(node, ast.ExceptHandler):
                 continue
             
-            # Only target `except Exception:` with pass/continue body
-            if not (isinstance(node.type, ast.Name) and node.type.id == "Exception"):
+            # Target ALL typed exceptions with pass/continue body
+            # Skip legitimate suppression: CancelledError, KeyboardInterrupt, GeneratorExit
+            if node.type is None:
+                continue  # bare except handled separately
+            
+            # Get the exception type name
+            if isinstance(node.type, ast.Name):
+                exc_name = node.type.id
+            elif isinstance(node.type, ast.Attribute):
+                exc_name = node.type.attr
+            else:
+                continue
+            
+            # Skip legitimate suppression patterns
+            if exc_name in ("CancelledError", "KeyboardInterrupt", "GeneratorExit"):
                 continue
             
             if len(node.body) != 1:

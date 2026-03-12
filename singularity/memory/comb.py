@@ -117,12 +117,13 @@ class CombMemory:
         """
         import socket as sock_mod
         
-        # Find the workspace root (parent of store_path's parent)
-        workspace = self.store_path.parent
-        # Walk up until we find a workspace-like directory
-        for candidate in [workspace, workspace.parent, workspace.parent.parent]:
-            if (candidate / ".ava-memory").exists():
-                workspace = candidate
+        # Find the workspace root by walking up from store_path
+        # store_path is typically deep (e.g. /workspace/singularity/.core/memory/)
+        # .ava-memory lives at /workspace/.ava-memory — need to walk up enough levels
+        workspace = self.store_path
+        for _ in range(8):
+            workspace = workspace.parent
+            if (workspace / ".ava-memory").exists():
                 break
         
         pending_path = workspace / ".ava-memory" / "comb-pending.jsonl"

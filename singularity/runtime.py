@@ -1161,19 +1161,95 @@ class Runtime:
             return 4 * 3600
     
     async def _boot_immune(self) -> None:
-        """Initialize immune system."""
+        """Initialize immune system with self-healing + critical event handlers."""
         from .immune.watchdog import Watchdog
-        
+
         alert_channels = self.config.immune.alert_channels
         alert_chat_id = alert_channels[0] if alert_channels else None
-        
+
         self.watchdog = Watchdog(
             bus=self.bus,
             alert_chat_id=alert_chat_id,
             alert_channel="discord",
         )
         await self.watchdog.start()
-        logger.info("  IMMUNE ready (watchdog active)")
+
+        # --- SelfHealEngine (554 lines, previously built but never started) ---
+        try:
+            from .csuite.self_heal import SelfHealEngine
+            self._self_heal = SelfHealEngine(bus=self.bus, runtime=self)
+            await self._self_heal.start()
+            logger.info("  IMMUNE self-heal engine started")
+        except Exception as e:
+            logger.warning(f"  IMMUNE self-heal failed to start: {e}")
+
+        # --- Critical orphan event handlers ---
+        dispatch_ch = "1478716096667189292"  # #dispatch
+
+        @self.bus.on("cortex.engine.error")
+        async def _on_cortex_error(data):
+            logger.critical(f"[IMMUNE] CORTEX engine error: {data}")
+
+        @self.bus.on("cortex.turn.error")
+        async def _on_turn_error(data):
+            logger.error(f"[IMMUNE] CORTEX turn error: {data}")
+
+        @self.bus.on("sinew.tool.failed")
+        async def _on_tool_failed(data):
+            logger.error(f"[IMMUNE] Tool failure: {data}")
+
+        @self.bus.on("voice.provider.exhausted")
+        async def _on_voice_exhausted(data):
+            logger.critical(f"[IMMUNE] ALL voice providers exhausted: {data}")
+            try:
+                if hasattr(self, "tools") and self.tools and hasattr(self.tools, "_discord_adapter"):
+                    from .nerve.types import OutboundMessage
+                    await self.tools._discord_adapter.send(
+                        dispatch_ch,
+                        OutboundMessage(content=f"🔴 **VOICE EXHAUSTED** — All LLM providers down. {data}")
+                    )
+            except Exception:
+                logger.debug("Failed to alert Discord about voice exhaustion")
+
+        @self.bus.on("poa.audit.complete")
+        async def _on_poa_audit(data):
+            status = data.get("status", "") if isinstance(data, dict) else ""
+            if status in ("RED", "YELLOW"):
+                product = data.get("product_id", "unknown")
+                logger.warning(f"[IMMUNE] POA {product} status: {status}")
+                try:
+                    if hasattr(self, "tools") and self.tools and hasattr(self.tools, "_discord_adapter"):
+                        from .nerve.types import OutboundMessage
+                        emoji = "🔴" if status == "RED" else "🟡"
+                        await self.tools._discord_adapter.send(
+                            dispatch_ch,
+                            OutboundMessage(content=f"{emoji} **POA Alert** — {product}: {status}")
+                        )
+                except Exception:
+                    logger.debug("Failed to alert Discord about POA status")
+
+        @self.bus.on("immune.disk.warning")
+        async def _on_disk_warning(data):
+            logger.warning(f"[IMMUNE] Disk warning: {data}")
+            try:
+                if hasattr(self, "tools") and self.tools and hasattr(self.tools, "_discord_adapter"):
+                    from .nerve.types import OutboundMessage
+                    await self.tools._discord_adapter.send(
+                        dispatch_ch,
+                        OutboundMessage(content=f"🟡 **DISK WARNING** — {data}")
+                    )
+            except Exception:
+                logger.debug("Failed to alert Discord about disk warning")
+
+        @self.bus.on("immune.failover.voice")
+        async def _on_voice_failover(data):
+            logger.warning(f"[IMMUNE] Voice failover triggered: {data}")
+
+        @self.bus.on("immune.vitals")
+        async def _on_vitals(data):
+            logger.debug(f"[IMMUNE] Vitals update: {data}")
+
+        logger.info("  IMMUNE ready (watchdog + self-heal + 8 event handlers)")
     
     async def _boot_nerve_router(self) -> None:
         """Initialize message routing."""
