@@ -1177,7 +1177,11 @@ class Runtime:
         # --- SelfHealEngine (554 lines, previously built but never started) ---
         try:
             from .csuite.self_heal import SelfHealEngine
-            self._self_heal = SelfHealEngine(bus=self.bus, runtime=self)
+            self._self_heal = SelfHealEngine(
+                coordinator=self.dispatcher,
+                bus=self.bus,
+                workspace=Path(self.config.tools.workspace) / ".singularity",
+            )
             await self._self_heal.start()
             logger.info("  IMMUNE self-heal engine started")
         except Exception as e:
