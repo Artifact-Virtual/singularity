@@ -10,34 +10,38 @@
 - **Builder:** AVA (Ava Shakil) 🔮
 - **Architect:** Ali Shakil (CEO, Artifact Virtual)
 - **Runtime:** Python 3.11+ / asyncio
-- **Codebase:** 73 files, ~26,500 lines
-- **Tools:** 18 native
+- **Codebase:** 82 files, ~31,000 lines
+- **Tools:** 28 native
 - **Bot ID:** 1478409279777013862 (Discord)
 
-## Subsystems (12 Phases, All Operational)
+## Subsystems (13 Subsystems, All Operational)
 
-| Phase | Subsystem | Purpose |
-|-------|-----------|---------|
-| 0 | **Core Validation** | .core/ integrity check |
-| 1 | **Event Bus** | Internal pub/sub messaging |
-| 2 | **MARROW** (Memory) | COMB + sessions + context persistence |
-| 3 | **SINEW** (Tools) | 18 tools — exec, read, write, edit, web_fetch, discord, comb, memory_search, nexus×5, csuite, poa×2 |
-| 4 | **VOICE** (LLM) | Provider chain: Copilot → Ollama, circuit breaker fallback |
-| 5 | **CORTEX** (Brain) | Agent loop, planner, tool orchestration, BLINK continuation |
-| 6 | **CSUITE** (Command) | CTO, COO, CFO, CISO — scoped tools, auto-dispatch |
-| 7 | **NEXUS** (Evolution) | Self-optimization — AST analysis, hot-swap, evolution engine |
-| 8 | **PULSE** (Scheduler) | Cron, interval timers, iteration budgets, POA scheduling |
-| 8.5 | **POA** (Products) | Product Owner Agents — health, uptime, alert escalation |
-| 9 | **IMMUNE** (Health) | Subsystem watchdog, degradation detection, auto-recovery |
-| 10-12 | **NERVE** (Comms) | Discord adapter, HTTP API (:8450), message routing |
+| Subsystem | Purpose |
+|-----------|---------|
+| **CORTEX** (Brain) | Agent loop, planner, tool orchestration, BLINK continuation |
+| **SINEW** (Tools) | 28 native tools — core, comms, memory, NEXUS, C-Suite, POA, ATLAS, releases |
+| **VOICE** (LLM) | Provider chain: Copilot → Ollama, circuit breaker fallback |
+| **MEMORY** (Persistence) | COMB + sessions + context persistence, HEKTOR hybrid search |
+| **CSUITE** (Command) | CTO, COO, CFO, CISO — scoped tools, auto-dispatch |
+| **NEXUS** (Evolution) | Self-optimization — AST analysis, hot-swap, evolution engine |
+| **PULSE** (Scheduler) | Cron, interval timers, iteration budgets, POA scheduling |
+| **POA** (Products) | Product Owner Agents — health, uptime, alert escalation |
+| **IMMUNE** (Health) | Subsystem watchdog, degradation detection, auto-recovery |
+| **NERVE** (Comms) | Discord adapter, HTTP API (:8450), message routing |
+| **ATLAS** (Topology) | Enterprise-wide module discovery, health tracking, board reports |
+| **AUDITOR** (Ops) | Continuous operational auditing, release management, changelog generation |
+| **CLI** (Interface) | Command-line tools for setup, diagnostics, management |
 
-## Tools (18)
+## Tools (28)
 
 **Core:** `exec` `read` `write` `edit` `web_fetch`
 **Comms:** `discord_send` `discord_react`
 **Memory:** `comb_stage` `comb_recall` `memory_search`
 **NEXUS:** `nexus_audit` `nexus_status` `nexus_swap` `nexus_rollback` `nexus_evolve`
-**Delegation:** `csuite_dispatch` `poa_setup` `poa_manage`
+**Delegation:** `csuite_dispatch`
+**Products:** `poa_setup` `poa_manage`
+**Topology:** `atlas_status` `atlas_topology` `atlas_module` `atlas_report` `atlas_visibility`
+**Releases:** `release_scan` `release_status` `release_confirm` `release_ship` `release_reject`
 
 ## Infrastructure
 
