@@ -33,7 +33,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 def main():
     parser = argparse.ArgumentParser(
         prog="singularity",
-        description="Singularity [AE] — Autonomous Enterprise Runtime",
+        description="Singularity [AE] — Obelisk",
         epilog="Not a chatbot. An operating system.",
     )
     sub = parser.add_subparsers(dest="command", required=True)

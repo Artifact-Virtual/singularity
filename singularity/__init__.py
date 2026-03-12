@@ -1,8 +1,8 @@
 """
-SINGULARITY — Autonomous Enterprise Runtime
-============================================
+SINGULARITY — Obelisk
+=====================
 
-Autonomous Enterprise Runtime.
+Obelisk.
 Built from ground up. Not a patch. Not a clone. An organism.
 
 Subsystems:

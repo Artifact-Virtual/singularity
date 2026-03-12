@@ -18,7 +18,7 @@ inhabit the Singularity runtime. Fresh slate. No corruption.
 Usage:
     python3 scripts/fresh_install.py                    # Interactive
     python3 scripts/fresh_install.py --manifest agent.yaml  # From manifest
-    python3 scripts/fresh_install.py --name "Singularity" --emoji "⚡" --role "Autonomous Enterprise Runtime"
+    python3 scripts/fresh_install.py --name "Singularity" --emoji "⚡" --role "Obelisk"
 
 The manifest file (agent.yaml) is the single source of truth
 for WHO the agent is. Everything else is generated from it.
@@ -52,7 +52,7 @@ DEFAULT_MANIFEST = {
     "agent": {
         "name": "Singularity",
         "emoji": "⚡",
-        "role": "Autonomous Enterprise Runtime",
+        "role": "Obelisk",
         "personality": {
             "style": "Execute, don't narrate. Operational, precise, minimal.",
             "tone": "Professional, direct. Warm only when warranted.",
@@ -157,7 +157,7 @@ def create_fresh_core(core_dir: Path, manifest: dict) -> None:
     agent = manifest.get("agent", {})
     name = agent.get("name", "Singularity")
     emoji = agent.get("emoji", "⚡")
-    role = agent.get("role", "Autonomous Enterprise Runtime")
+    role = agent.get("role", "Obelisk")
     personality = agent.get("personality", {})
     domain = agent.get("domain", [])
     capabilities = agent.get("capabilities", [])

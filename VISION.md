@@ -1,5 +1,5 @@
 # SINGULARITY [AE — Autonomous Enterprise]
-## Autonomous Enterprise Runtime
+## Obelisk
 
 > "If it computes, it will work. Patience is a virtue."
 

@@ -1270,7 +1270,7 @@ def main():
             from .cli.main import main as cli_main
             cli_main()
         else:
-            print("SINGULARITY [AE] — Autonomous Enterprise Runtime")
+            print("SINGULARITY [AE] — Obelisk")
             print()
             print("Usage:")
             print("  python3 -m singularity              # Start Singularity")
