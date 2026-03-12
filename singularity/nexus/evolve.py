@@ -233,6 +233,15 @@ class EvolutionEngine:
         # Pattern 3: String concatenation in loops (performance)
         evolutions.extend(self._find_string_concat_in_loops(tree, filepath, lines))
         
+        # Pattern 4: Missing logger in modules with exception handling
+        evolutions.extend(self._find_missing_loggers(tree, filepath, lines, source))
+        
+        # Pattern 5: Broad exception catching (catch-all Exception)
+        evolutions.extend(self._find_broad_exceptions(tree, filepath, lines))
+        
+        # Pattern 6: Mutable default arguments
+        evolutions.extend(self._find_mutable_defaults(tree, filepath, lines))
+        
         return evolutions
     
     def _find_silent_exceptions(
@@ -403,6 +412,110 @@ class EvolutionEngine:
         
         return evolutions
     
+
+    def _find_missing_loggers(
+        self, tree: ast.AST, filepath: Path, lines: list[str], source: str
+    ) -> list[Evolution]:
+        """Detect modules that handle exceptions but have no logger."""
+        evolutions = []
+        has_except = any(isinstance(n, ast.ExceptHandler) for n in ast.walk(tree))
+        has_logger = "logger" in source or "logging.getLogger" in source
+        
+        if has_except and not has_logger:
+            # Check if logging is imported
+            has_logging_import = any(
+                isinstance(n, ast.Import) and any(a.name == "logging" for a in n.names)
+                or isinstance(n, ast.ImportFrom) and n.module == "logging"
+                for n in ast.walk(tree)
+            )
+            if not has_logging_import:
+                # Add logging import + logger at module level
+                first_import_line = 0
+                for i, line in enumerate(lines):
+                    if line.startswith("import ") or line.startswith("from "):
+                        first_import_line = i
+                        break
+                
+                module_name = filepath.stem
+                new_line = f"import logging\nlogger = logging.getLogger(\"{module_name}\")"
+                
+                evolutions.append(Evolution(
+                    file=filepath,
+                    line=first_import_line + 1,
+                    pattern="missing_logger",
+                    description=f"Module handles exceptions but has no logger",
+                    original=lines[first_import_line] if first_import_line < len(lines) else "",
+                    replacement=new_line + "\n" + (lines[first_import_line] if first_import_line < len(lines) else ""),
+                    confidence=0.7,
+                ))
+        return evolutions
+
+    def _find_broad_exceptions(
+        self, tree: ast.AST, filepath: Path, lines: list[str]
+    ) -> list[Evolution]:
+        """Detect except Exception that should be more specific."""
+        evolutions = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ExceptHandler):
+                if (node.type and isinstance(node.type, ast.Name) 
+                    and node.type.id == "Exception"
+                    and node.body):
+                    # Check if the handler just logs — that's fine
+                    # Only flag if handler does nothing useful
+                    body_src = ""
+                    for stmt in node.body:
+                        if hasattr(stmt, 'lineno') and stmt.lineno <= len(lines):
+                            body_src += lines[stmt.lineno - 1].strip() + " "
+                    
+                    if "pass" in body_src and len(node.body) == 1:
+                        func_name, class_name = self._find_enclosing(tree, node.lineno)
+                        evolutions.append(Evolution(
+                            file=filepath,
+                            line=node.lineno,
+                            pattern="broad_exception_pass",
+                            description=f"except Exception: pass — errors silently swallowed",
+                            original=lines[node.lineno - 1].rstrip() if node.lineno <= len(lines) else "",
+                            replacement="",  # Can't auto-fix — needs manual review
+                            confidence=0.5,  # Low confidence = won't auto-apply
+                            function_name=func_name,
+                            class_name=class_name,
+                        ))
+        return evolutions
+
+    def _find_mutable_defaults(
+        self, tree: ast.AST, filepath: Path, lines: list[str]
+    ) -> list[Evolution]:
+        """Detect mutable default arguments (list, dict, set defaults)."""
+        evolutions = []
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                for default in node.args.defaults + node.args.kw_defaults:
+                    if default is None:
+                        continue
+                    if isinstance(default, (ast.List, ast.Dict, ast.Set)):
+                        func_name = node.name
+                        class_name = None
+                        # Find parent class if any
+                        for parent in ast.walk(tree):
+                            if isinstance(parent, ast.ClassDef):
+                                for child in ast.walk(parent):
+                                    if child is node:
+                                        class_name = parent.name
+                                        break
+                        
+                        evolutions.append(Evolution(
+                            file=filepath,
+                            line=node.lineno,
+                            pattern="mutable_default",
+                            description=f"Mutable default argument in {func_name}() — use None + if-guard",
+                            original=lines[node.lineno - 1].rstrip() if node.lineno <= len(lines) else "",
+                            replacement="",  # Complex fix, low confidence
+                            confidence=0.4,
+                            function_name=func_name,
+                            class_name=class_name,
+                        ))
+        return evolutions
+
     def _find_enclosing(
         self, tree: ast.Module, lineno: int
     ) -> tuple[str | None, str | None]:
