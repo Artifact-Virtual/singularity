@@ -240,6 +240,11 @@ class CortexEngine:
                     keep_count = max(10, len(history_for_check) // 3)
                     kept_msgs = history_for_check[-keep_count:]
                     
+                    # Fix: skip leading orphan tool results at compaction boundary
+                    # A tool message without a preceding assistant+tool_calls is invalid
+                    while kept_msgs and kept_msgs[0].role == "tool":
+                        kept_msgs = kept_msgs[1:]
+                    
                     # Inject summary as system message at the start
                     summary_msg = Message(role="system", content=summary)
                     compacted = [summary_msg] + [
