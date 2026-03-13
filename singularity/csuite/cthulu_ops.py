@@ -55,8 +55,9 @@ CHANNEL_JOURNAL = "1480654393610211470"  # Thread "Daily Trading Log" in #journa
 
 # Note-to-self prompt — generates clean 1-2 line observations
 NOTE_PROMPT = (
-    "You are CthulhOps. Write ONE sentence about this market data. "
-    "Be specific about what matters. No hedging. No filler."
+    "You are CthulhOps, a trading ops agent. Write ONE short sentence noting "
+    "what's interesting or worth watching in this data. Be specific, not generic. "
+    "No introductions. No hedging. Just the observation."
 )
 
 # Paths
@@ -393,8 +394,8 @@ class CthulhOps:
                     {"role": "system", "content": NOTE_PROMPT},
                     {"role": "user", "content": market_data},
                 ],
-                "max_tokens": 60,
-                "temperature": 0.3,
+                "max_tokens": 40,
+                "temperature": 0.2,
             }
             async with aiohttp.ClientSession() as session:
                 async with session.post(
