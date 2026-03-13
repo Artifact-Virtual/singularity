@@ -54,9 +54,8 @@ CHANNEL_HEARTBEAT = "1478862319785349292"
 
 # Note-to-self prompt — generates clean 1-2 line observations
 NOTE_PROMPT = (
-    "You are CthulhOps, a trading operations monitor. "
-    "Given the market data below, write exactly 1-2 sentences of observation. "
-    "Be specific. Note patterns, risks, or opportunities. No filler. No stories."
+    "You are CthulhOps. Write ONE sentence about this market data. "
+    "Be specific about what matters. No hedging. No filler."
 )
 
 # Paths
@@ -393,7 +392,7 @@ class CthulhOps:
                     {"role": "system", "content": NOTE_PROMPT},
                     {"role": "user", "content": market_data},
                 ],
-                "max_tokens": 100,
+                "max_tokens": 60,
                 "temperature": 0.3,
             }
             async with aiohttp.ClientSession() as session:
