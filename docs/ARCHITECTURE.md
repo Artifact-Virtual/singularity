@@ -19,6 +19,8 @@
    - [IMMUNE — Health & Recovery](#immune--health--recovery)
    - [PULSE — Scheduler](#pulse--scheduler)
    - [SPINE — Configuration](#spine--configuration)
+   - [AUDITOR — Workspace Intelligence](#auditor--workspace-intelligence)
+   - [CLI — Command Interface](#cli--command-interface)
 5. [C-Suite Layer](#c-suite-layer)
    - [Executive Lifecycle](#executive-lifecycle)
    - [Coordinator](#coordinator)
@@ -47,7 +49,7 @@
 
 Singularity is a **self-scaling autonomous enterprise runtime**. It deploys AI executive agents, monitors live products, heals degraded systems, and evolves its own codebase — from a solo founder environment to a multinational.
 
-**10 core subsystems.** All communicate through a central async event bus. Any component can fail independently. The system heals faster than it degrades.
+**13 subsystems.** All communicate through a central async event bus. Any component can fail independently. The system heals faster than it degrades.
 
 ```
                           ┌────────────────────────────────────┐
@@ -86,7 +88,8 @@ singularity/
 ├── poa/                     # 📋 POA — Product owner agents
 ├── atlas/                   # 🗺️ ATLAS — Enterprise topology
 ├── nexus/                   # 🔁 NEXUS — Self-optimization
-└── auditor/                 # 🔍 AUDITOR — Workspace intelligence
+├── auditor/                 # 🔍 AUDITOR — Workspace intelligence
+└── cli/                     # 🖥️ CLI — Command-line interface
 ```
 
 ---
@@ -205,7 +208,7 @@ COMB-native persistence. Every session, every tool result, every key decision fl
 Provider chain with automatic fallback. The brain's connection to language — not the brain itself.
 
 ```
-Primary: Anthropic claude-sonnet-4-20250514
+Primary: HuggingFace (router.huggingface.co — OpenAI-compatible, 120+ models)
     ↓ (3 failures → circuit open)
 Fallback: GitHub Copilot Proxy (localhost)
     ↓ (3 failures → circuit open)
@@ -218,7 +221,7 @@ Degraded mode: structured error response
 Each provider tracks failures. After 3 consecutive failures, the circuit opens and requests route to the next provider. The circuit resets after a configurable cooldown.
 
 #### Streaming
-SSE streaming supported on Copilot proxy and Anthropic. Ollama uses the native streaming API.
+SSE streaming supported on Copilot proxy and HuggingFace. Ollama uses the native streaming API.
 
 ---
 
@@ -832,10 +835,12 @@ singularity/
 │   ├── memory/
 │   │   ├── comb.py             # COMB bridge (stage/recall/rollup)
 │   │   ├── hektor.py           # HEKTOR vector search integration
-│   │   └── sessions.py         # Session management + SQLite
+│   │   ├── sessions.py         # Session management + SQLite
+│   │   └── __init__.py
 │   │
 │   ├── voice/
 │   │   ├── chain.py            # Provider cascade + circuit breakers
+│   │   ├── huggingface.py      # HuggingFace Inference API (primary — router.huggingface.co)
 │   │   ├── ollama.py           # Local Ollama (sovereign mode)
 │   │   ├── provider.py         # Abstract provider + ChatMessage types
 │   │   └── proxy.py            # GitHub Copilot proxy
@@ -858,7 +863,8 @@ singularity/
 │   ├── pulse/
 │   │   ├── budget.py           # Iteration budget manager
 │   │   ├── health.py           # PULSE health monitor
-│   │   └── scheduler.py        # Cron + timers + triggers
+│   │   ├── scheduler.py        # Cron + timers + triggers
+│   │   └── __init__.py
 │   │
 │   ├── csuite/
 │   │   ├── coordinator.py      # Dispatch orchestration
@@ -896,7 +902,14 @@ singularity/
 │       ├── analyzer.py         # Workspace maturity scoring
 │       ├── report.py           # JSON + Markdown report generation
 │       ├── scanner.py          # Filesystem + git analysis
-│       └── templates.py        # Industry-specific templates
+│       ├── templates.py        # Industry-specific templates
+│       └── __init__.py
+│
+│   ├── cli/
+│   │   ├── main.py             # CLI entry point + command registry
+│   │   ├── formatters.py       # Output formatters
+│   │   ├── wizard.py           # Interactive setup wizard
+│   │   └── __init__.py
 │
 ├── config/
 │   ├── singularity.yaml        # Active config (gitignored)

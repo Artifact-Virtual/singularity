@@ -11,7 +11,7 @@ An AI runtime that doesn't just respond to commands — it runs your entire orga
 Nothing like this has been built before.
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
-[![Lines of Code](https://img.shields.io/badge/lines-31%2C013-blue?style=flat-square)](.)
+[![Lines of Code](https://img.shields.io/badge/lines-31%2C261-blue?style=flat-square)](.)
 [![Subsystems](https://img.shields.io/badge/subsystems-13-blue?style=flat-square)](.)
 [![Tools](https://img.shields.io/badge/tools-28-blue?style=flat-square)](.)
 [![License](https://img.shields.io/badge/license-proprietary-red?style=flat-square)](LICENSE)
@@ -19,7 +19,7 @@ Nothing like this has been built before.
 
 ---
 
-*82 files. 13 subsystems. 28 tools. 4 autonomous executives.*
+*83 files. 13 subsystems. 28 tools. 4 autonomous executives.*
 *One runtime that replaces your entire ops team.*
 
 </div>

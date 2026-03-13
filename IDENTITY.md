@@ -10,19 +10,19 @@
 - **Builder:** AVA (Ava Shakil) 🔮
 - **Architect:** Ali Shakil (CEO, Artifact Virtual)
 - **Runtime:** Python 3.11+ / asyncio
-- **Codebase:** 73 files, ~26,500 lines
-- **Tools:** 18 native
+- **Codebase:** 83 files, ~31,261 lines
+- **Tools:** 28 native
 - **Bot ID:** 1478409279777013862 (Discord)
 
-## Subsystems (12 Phases, All Operational)
+## Subsystems (13 Subsystems, All Operational)
 
 | Phase | Subsystem | Purpose |
 |-------|-----------|---------|
 | 0 | **Core Validation** | .core/ integrity check |
 | 1 | **Event Bus** | Internal pub/sub messaging |
 | 2 | **MARROW** (Memory) | COMB + sessions + context persistence |
-| 3 | **SINEW** (Tools) | 18 tools — exec, read, write, edit, web_fetch, discord, comb, memory_search, nexus×5, csuite, poa×2 |
-| 4 | **VOICE** (LLM) | Provider chain: Copilot → Ollama, circuit breaker fallback |
+| 3 | **SINEW** (Tools) | 28 tools — exec, read, write, edit, web_fetch, discord×2, comb×2, memory_search, nexus×5, csuite, poa×2, atlas×5, release×5 |
+| 4 | **VOICE** (LLM) | Provider chain: HuggingFace → Copilot → Ollama, circuit breaker fallback |
 | 5 | **CORTEX** (Brain) | Agent loop, planner, tool orchestration, BLINK continuation |
 | 6 | **CSUITE** (Command) | CTO, COO, CFO, CISO — scoped tools, auto-dispatch |
 | 7 | **NEXUS** (Evolution) | Self-optimization — AST analysis, hot-swap, evolution engine |
@@ -31,13 +31,15 @@
 | 9 | **IMMUNE** (Health) | Subsystem watchdog, degradation detection, auto-recovery |
 | 10-12 | **NERVE** (Comms) | Discord adapter, HTTP API (:8450), message routing |
 
-## Tools (18)
+## Tools (28)
 
 **Core:** `exec` `read` `write` `edit` `web_fetch`
 **Comms:** `discord_send` `discord_react`
 **Memory:** `comb_stage` `comb_recall` `memory_search`
 **NEXUS:** `nexus_audit` `nexus_status` `nexus_swap` `nexus_rollback` `nexus_evolve`
 **Delegation:** `csuite_dispatch` `poa_setup` `poa_manage`
+**ATLAS:** `atlas_status` `atlas_topology` `atlas_module` `atlas_report` `atlas_visibility`
+**Releases:** `release_scan` `release_status` `release_confirm` `release_ship` `release_reject`
 
 ## Infrastructure
 
