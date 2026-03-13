@@ -7,7 +7,7 @@ name = "singularity-ae"
 version = "0.1.0"
 description = "Autonomous Enterprise Runtime — self-scaling AI executive agents, product monitoring, and organizational intelligence."
 readme = "README.md"
-license = {text = "Proprietary"}
+license = {text = "AGPL-3.0-or-later"}
 requires-python = ">=3.11"
 authors = [
     {name = "Ali Shakil", email = "ali.shakil@artifactvirtual.com"},
