@@ -16,6 +16,7 @@ import asyncio
 import datetime
 import json
 import logging
+import traceback
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
@@ -173,7 +174,7 @@ class Atlas:
             return result
 
         except Exception as e:
-            logger.error(f"ATLAS: Cycle failed — {e}")
+            logger.error(f"ATLAS: Cycle failed — {e}\n{traceback.format_exc()}")
             return {"status": "error", "error": str(e)}
         finally:
             self._running = False
@@ -277,7 +278,7 @@ class Atlas:
         index = {}
         for mod_id in sorted(self.graph.modules.keys()):
             mod = self.graph.modules[mod_id]
-            if mod.status == ModuleStatus.GONE:
+            if mod is None or mod.status == ModuleStatus.GONE:
                 continue
             index[mod_id] = {
                 "name": mod.name,
