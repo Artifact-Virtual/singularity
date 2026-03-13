@@ -51,6 +51,7 @@ ALI_MENTION = "<@193011943382974466>"
 # Discord channels
 CHANNEL_AVA = "1475929150488449138"
 CHANNEL_HEARTBEAT = "1478862319785349292"
+CHANNEL_JOURNAL = "1480654393610211470"  # Thread "Daily Trading Log" in #journal forum
 
 # Note-to-self prompt — generates clean 1-2 line observations
 NOTE_PROMPT = (
@@ -599,7 +600,11 @@ class CthulhOps:
 
         full_message = f"{prefix} {message}" if prefix else message
 
-        await self._post_discord_webhook(full_message)
+        # Alerts go to heartbeat webhook, journal entries go to #journal
+        if level in ("critical", "warning"):
+            await self._post_discord_webhook(full_message, CHANNEL_HEARTBEAT)
+        else:
+            await self._post_discord_webhook(full_message)
 
         # Also emit on bus for other subsystems
         if self.bus:
@@ -611,12 +616,13 @@ class CthulhOps:
 
         logger.info(f"Alert [{level}]: {message[:80]}")
 
-    async def _post_discord_webhook(self, content: str) -> bool:
+    async def _post_discord_webhook(self, content: str, channel: str = None) -> bool:
         """Post a message to Discord via bus event (routed to Discord adapter)."""
+        target_channel = channel or CHANNEL_JOURNAL
         if self.bus:
             try:
                 await self.bus.emit("cthulu.discord.send", {
-                    "channel_id": CHANNEL_AVA,
+                    "channel_id": target_channel,
                     "content": content[:2000],
                 })
                 return True
