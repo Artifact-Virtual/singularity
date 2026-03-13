@@ -1918,16 +1918,17 @@ class Runtime:
                                 from .nerve.types import OutboundMessage
                                 payload = event.get("payload", {})
                                 msg = (
-                                    f"**[{severity}] ExfilGuard Security Alert**\n"
-                                    f"```\n"
-                                    f"Type: {payload.get('type', '?')}\n"
-                                    f"IP:   {payload.get('ip', '?')}\n"
-                                    f"rDNS: {payload.get('rdns', '?')}\n"
-                                    f"```"
+                                    f"🚨 **[{severity}] ExfilGuard Security Alert**\n"
+                                    f"<@193011943382974466> <@1478409279777013862>\n"
+                                    f"**Type:** {payload.get('type', '?')}\n"
+                                    f"**IP:** {payload.get('ip', '?')}\n"
+                                    f"**rDNS:** {payload.get('rdns', '?')}\n"
+                                    f"**Process:** {payload.get('process', 'unknown')}\n"
+                                    f"**Cmdline:** {payload.get('cmdline', 'unknown')[:200]}\n"
                                 )
                                 adapter = self.adapters["discord"]
-                                # Forward to security channel only — CISO handles #dispatch
-                                for ch_id in ("1328051692167762034",):  # security channel only
+                                # Forward to BOTH #dispatch and #ciso — with @mentions
+                                for ch_id in ("1478716096667189292", "1478716112827842661"):
                                     await adapter.send(
                                         ch_id,
                                         OutboundMessage(content=msg)
@@ -1991,6 +1992,7 @@ class Runtime:
                                             # Build concise dispatch message
                                             verdict_msg = (
                                                 f"🛡️ **CISO Security Report** — ExfilGuard {severity}\n"
+                                                f"<@193011943382974466> <@1478409279777013862>\n"
                                                 f"**IP:** {payload.get('ip', '?')} | **rDNS:** {payload.get('rdns', '?')}\n"
                                                 f"**Process:** {payload.get('process', '?')}\n\n"
                                                 f"{ciso_response[:1800]}"

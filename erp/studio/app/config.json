@@ -1,0 +1,89 @@
+{
+  "app": {
+    "name": "Singularity",
+    "version": "1.0.0",
+    "description": "Enterprise Management Platform",
+    "organization": "Artifact Virtual"
+  },
+  "auth": {
+    "dev_account": {
+      "email": "ali.shakil@live.com",
+      "password": "sirius",
+      "name": "Ali Shakil",
+      "role": "admin"
+    },
+    "providers": {
+      "local": true,
+      "google": true,
+      "github": true
+    }
+  },
+  "paths": {
+    "workspace": "c:/workspace/__SANDBOX/artifact-virtual",
+    "studio": "c:/workspace/__SANDBOX/artifact-virtual/studio",
+    "data": "c:/workspace/__SANDBOX/artifact-virtual/studio/data",
+    "config": "c:/workspace/__SANDBOX/artifact-virtual/studio/config"
+  },
+  "modules": {
+    "dashboard": {
+      "enabled": true,
+      "refresh_interval": 5000
+    },
+    "development": {
+      "enabled": true,
+      "features": ["projects", "repositories", "pipelines", "deployments"]
+    },
+    "crm": {
+      "enabled": true,
+      "features": ["contacts", "deals", "campaigns", "support"]
+    },
+    "hrm": {
+      "enabled": true,
+      "features": ["employees", "recruitment", "performance", "payroll"]
+    },
+    "finance": {
+      "enabled": true,
+      "features": ["ledger", "receivables", "payables", "reports"]
+    },
+    "stakeholders": {
+      "enabled": true,
+      "features": ["investors", "board", "partners"]
+    },
+    "infrastructure": {
+      "enabled": true,
+      "features": ["nginx", "servers", "containers", "monitoring"]
+    },
+    "security": {
+      "enabled": true,
+      "features": ["users", "roles", "audit", "compliance"]
+    },
+    "analytics": {
+      "enabled": true,
+      "features": ["dashboards", "reports", "kpis"]
+    },
+    "integrations": {
+      "enabled": true,
+      "features": ["social", "data_providers", "webhooks"]
+    },
+    "workflows": {
+      "enabled": true,
+      "features": ["editor", "executions", "templates"]
+    }
+  },
+  "api": {
+    "base_url": "/api",
+    "websocket_url": "ws://localhost:4000"
+  },
+  "file_watcher": {
+    "enabled": true,
+    "watch_paths": [
+      "c:/workspace/__SANDBOX/artifact-virtual"
+    ],
+    "ignore_patterns": [
+      "node_modules",
+      ".git",
+      "dist",
+      "*.log"
+    ]
+  }
+}

@@ -1,0 +1,435 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider        = "prisma-client-js"
+  
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String    @id @default(uuid())
+  email         String    @unique
+  password      String
+  firstName     String
+  lastName      String
+  roleId        String
+  role          Role      @relation(fields: [roleId], references: [id])
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  activities    Activity[]
+  resetToken    String?
+  resetTokenExp DateTime?
+  
+  @@map("users")
+}
+
+model Role {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  permissions String[] // JSON array of permissions
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  users       User[]
+  
+  @@map("roles")
+}
+
+model Contact {
+  id          String   @id @default(uuid())
+  firstName   String
+  lastName    String
+  email       String   @unique
+  phone       String?
+  company     String?
+  position    String?
+  address     String?
+  status      String   @default("active") // active, inactive, lead
+  source      String?  // web, referral, cold-call, etc.
+  tags        String[] // Array of tags
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deals       Deal[]
+  activities  Activity[]
+  tickets     Ticket[]
+  
+  @@map("contacts")
+}
+
+model Deal {
+  id          String   @id @default(uuid())
+  title       String
+  description String?
+  value       Float
+  currency    String   @default("USD")
+  stage       String   // lead, qualified, proposal, negotiation, closed-won, closed-lost
+  probability Int      @default(0) // 0-100
+  expectedCloseDate DateTime?
+  actualCloseDate   DateTime?
+  contactId   String
+  contact     Contact  @relation(fields: [contactId], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  activities  Activity[]
+  
+  @@map("deals")
+}
+
+model Employee {
+  id           String    @id @default(uuid())
+  firstName    String
+  lastName     String
+  email        String    @unique
+  phone        String?
+  department   String
+  position     String
+  salary       Float?
+  hireDate     DateTime
+  status       String    @default("active") // active, on-leave, terminated
+  address      String?
+  emergencyContact String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  projects     Project[]
+  reviews      PerformanceReview[]
+  goals        Goal[]
+  payrollRuns  PayrollRun[]
+  
+  @@map("employees")
+}
+
+model Project {
+  id          String    @id @default(uuid())
+  name        String
+  description String?
+  status      String    @default("planning") // planning, active, on-hold, completed, cancelled
+  priority    String    @default("medium") // low, medium, high, critical
+  startDate   DateTime
+  endDate     DateTime?
+  budget      Float?
+  progress    Int       @default(0) // 0-100
+  employeeId  String
+  employee    Employee  @relation(fields: [employeeId], references: [id])
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  activities  Activity[]
+  
+  @@map("projects")
+}
+
+model Invoice {
+  id            String    @id @default(uuid())
+  invoiceNumber String    @unique
+  title         String
+  description   String?
+  amount        Float
+  currency      String    @default("USD")
+  status        String    @default("draft") // draft, sent, paid, overdue, cancelled
+  issueDate     DateTime  @default(now())
+  dueDate       DateTime
+  paidDate      DateTime?
+  paidAmount    Float?
+  paymentMethod String?   // bank-transfer, credit-card, cash, etc.
+  clientName    String
+  clientEmail   String
+  clientAddress String?
+  items         Json?     // Array of line items
+  notes         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  
+  @@map("invoices")
+}
+
+model Activity {
+  id          String    @id @default(uuid())
+  type        String    // call, email, meeting, note, task
+  subject     String
+  description String?
+  status      String    @default("pending") // pending, completed, cancelled
+  dueDate     DateTime?
+  completedAt DateTime?
+  userId      String
+  user        User      @relation(fields: [userId], references: [id])
+  contactId   String?
+  contact     Contact?  @relation(fields: [contactId], references: [id])
+  dealId      String?
+  deal        Deal?     @relation(fields: [dealId], references: [id])
+  projectId   String?
+  project     Project?  @relation(fields: [projectId], references: [id])
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  
+  @@map("activities")
+}
+
+// ============================================================================
+// Tier 3: CRM Extensions
+// ============================================================================
+
+model Campaign {
+  id          String   @id @default(uuid())
+  name        String
+  type        String   // email, social, ppc, content, event
+  status      String   @default("draft") // draft, active, paused, completed
+  budget      Float    @default(0)
+  spent       Float    @default(0)
+  startDate   DateTime?
+  endDate     DateTime?
+  leads       Int      @default(0)
+  conversions Int      @default(0)
+  revenue     Float    @default(0)
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("campaigns")
+}
+
+model Ticket {
+  id          String   @id @default(uuid())
+  subject     String
+  description String?
+  status      String   @default("open") // open, in-progress, resolved, closed
+  priority    String   @default("medium") // low, medium, high, critical
+  category    String?  // billing, technical, general, feature-request
+  contactId   String?
+  contact     Contact? @relation(fields: [contactId], references: [id])
+  assignee    String?
+  resolution  String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("tickets")
+}
+
+// ============================================================================
+// Tier 3: HRM Extensions
+// ============================================================================
+
+model JobPosting {
+  id           String      @id @default(uuid())
+  title        String
+  department   String
+  location     String?
+  type         String      @default("full-time") // full-time, part-time, contract, internship
+  status       String      @default("draft") // draft, open, closed, on-hold
+  description  String?
+  requirements String?
+  salaryMin    Float?
+  salaryMax    Float?
+  applicants   Applicant[]
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  @@map("job_postings")
+}
+
+model Applicant {
+  id          String     @id @default(uuid())
+  firstName   String
+  lastName    String
+  email       String
+  phone       String?
+  resume      String?   // URL or text
+  status      String    @default("applied") // applied, screening, interview, offer, hired, rejected
+  rating      Int?      // 1-5
+  notes       String?
+  jobId       String
+  job         JobPosting @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  @@map("applicants")
+}
+
+model PerformanceReview {
+  id          String   @id @default(uuid())
+  employeeId  String
+  employee    Employee @relation(fields: [employeeId], references: [id])
+  reviewerId  String?
+  period      String   // Q1-2026, Q2-2026, Annual-2025, etc.
+  rating      Int      // 1-5
+  strengths   String?
+  improvements String?
+  goals       String?
+  status      String   @default("draft") // draft, submitted, acknowledged
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("performance_reviews")
+}
+
+model Goal {
+  id          String   @id @default(uuid())
+  employeeId  String
+  employee    Employee @relation(fields: [employeeId], references: [id])
+  title       String
+  description String?
+  status      String   @default("not-started") // not-started, in-progress, completed, cancelled
+  priority    String   @default("medium") // low, medium, high
+  dueDate     DateTime?
+  progress    Int      @default(0) // 0-100
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("goals")
+}
+
+model PayrollRun {
+  id          String   @id @default(uuid())
+  employeeId  String
+  employee    Employee @relation(fields: [employeeId], references: [id])
+  period      String   // 2026-01, 2026-02, etc.
+  baseSalary  Float
+  deductions  Float    @default(0)
+  bonuses     Float    @default(0)
+  netPay      Float
+  status      String   @default("pending") // pending, processed, paid
+  paidDate    DateTime?
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("payroll_runs")
+}
+
+// ============================================================================
+// Tier 3: Finance Extensions
+// ============================================================================
+
+model LedgerAccount {
+  id          String         @id @default(uuid())
+  code        String         @unique
+  name        String
+  type        String         // asset, liability, equity, revenue, expense
+  balance     Float          @default(0)
+  description String?
+  isActive    Boolean        @default(true)
+  entries     JournalEntry[]
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  @@map("ledger_accounts")
+}
+
+model JournalEntry {
+  id          String        @id @default(uuid())
+  accountId   String
+  account     LedgerAccount @relation(fields: [accountId], references: [id])
+  date        DateTime      @default(now())
+  description String
+  debit       Float         @default(0)
+  credit      Float         @default(0)
+  reference   String?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  @@map("journal_entries")
+}
+
+model Bill {
+  id          String   @id @default(uuid())
+  billNumber  String   @unique
+  vendorName  String
+  vendorEmail String?
+  description String?
+  amount      Float
+  currency    String   @default("USD")
+  status      String   @default("pending") // pending, approved, paid, overdue, cancelled
+  issueDate   DateTime @default(now())
+  dueDate     DateTime
+  paidDate    DateTime?
+  category    String?  // utilities, supplies, services, rent, etc.
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("bills")
+}
+
+// ============================================================================
+// Tier 3: Development Extensions
+// ============================================================================
+
+model Pipeline {
+  id          String   @id @default(uuid())
+  name        String
+  repository  String?
+  branch      String   @default("main")
+  status      String   @default("idle") // idle, running, success, failed
+  lastRunAt   DateTime?
+  duration    Int?     // seconds
+  stages      Json?    // [{name, status, duration}]
+  trigger     String?  // push, manual, schedule
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("pipelines")
+}
+
+model Deployment {
+  id          String   @id @default(uuid())
+  environment String   // production, staging, development
+  version     String
+  status      String   @default("pending") // pending, deploying, success, failed, rolled-back
+  deployedBy  String?
+  deployedAt  DateTime?
+  completedAt DateTime?
+  duration    Int?     // seconds
+  changelog   String?
+  rollbackOf  String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("deployments")
+}
+
+// ============================================================================
+// Tier 3: Stakeholders
+// ============================================================================
+
+model Stakeholder {
+  id          String   @id @default(uuid())
+  name        String
+  type        String   // investor, board-member, partner, advisor
+  email       String?
+  phone       String?
+  company     String?
+  title       String?
+  investment  Float?
+  equity      Float?   // percentage
+  status      String   @default("active") // active, inactive
+  notes       String?
+  joinDate    DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("stakeholders")
+}
+
+// ============================================================================
+// Tier 3: Workflows
+// ============================================================================
+
+model Workflow {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  status      String   @default("draft") // draft, active, paused, archived
+  trigger     String?  // manual, schedule, event
+  steps       Json?    // [{id, type, config, next}]
+  lastRunAt   DateTime?
+  runCount    Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("workflows")
+}

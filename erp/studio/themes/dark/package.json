@@ -1,0 +1,14 @@
+{
+  "name": "@singularity/theme-dark",
+  "version": "1.0.0",
+  "description": "Dark theme for Singularity",
+  "main": "index.ts",
+  "types": "index.ts",
+  "exports": {
+    ".": "./index.ts",
+    "./tokens.css": "./tokens.css"
+  },
+  "keywords": ["singularity", "theme", "dark"],
+  "author": "Artifact Virtual",
+  "license": "MIT"
+}

@@ -1,0 +1,14 @@
+{
+  "name": "@singularity/theme-default",
+  "version": "1.0.0",
+  "description": "Default light theme for Singularity",
+  "main": "index.ts",
+  "types": "index.ts",
+  "exports": {
+    ".": "./index.ts",
+    "./tokens.css": "./tokens.css"
+  },
+  "keywords": ["singularity", "theme", "light"],
+  "author": "Artifact Virtual",
+  "license": "MIT"
+}

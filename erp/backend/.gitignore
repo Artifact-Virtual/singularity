@@ -1,0 +1,22 @@
+node_modules
+dist
+build
+*.log
+.DS_Store
+
+# Keep environment variables out of version control
+.env
+
+# Prisma
+/generated/prisma
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Test coverage
+coverage/
+.nyc_output/
+
