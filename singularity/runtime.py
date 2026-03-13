@@ -119,7 +119,6 @@ class Runtime:
         self._nexus_daemon = None  # NEXUS evolution daemon (subagent)
         self.atlas = None        # ATLAS board manager
         self._release_manager = None  # POA release manager
-        self.cthulu_ops = None   # CthulhOps trading agent
         
         self._running = False
         self._boot_time: float | None = None
@@ -198,10 +197,6 @@ class Runtime:
         # Phase 8.7: ATLAS Board Manager (requires PULSE + bus)
         logger.info("[8.7/12] Starting ATLAS board manager...")
         await self._boot_atlas()
-
-        # Phase 8.8: CthulhOps Trading Agent (requires PULSE + bus)
-        logger.info("[8.8/12] Starting CthulhOps trading agent...")
-        await self._boot_cthulu_ops()
 
         # Phase 9: Health + Immune
         logger.info("[9/12] Initializing health monitoring (IMMUNE)...")
@@ -941,84 +936,6 @@ class Runtime:
             logger.warning(f"  ATLAS failed to start: {e}")
             self.atlas = None
 
-    async def _boot_cthulu_ops(self) -> None:
-        """Initialize CthulhOps trading operations agent with PULSE jobs."""
-        try:
-            from .csuite.cthulu_ops import CthulhOps
-            from .pulse.scheduler import JobConfig, JobType
-
-            self.cthulu_ops = CthulhOps(
-                bus=self.bus,
-                workspace=self.config.tools.workspace,
-            )
-
-            if not self.scheduler:
-                logger.warning("  CthulhOps: PULSE scheduler not available, skipping job registration")
-                return
-
-            # Health check every 5 minutes
-            self.scheduler.add(JobConfig(
-                id="cthulu-health",
-                name="CthulhOps Health Check",
-                job_type=JobType.INTERVAL,
-                interval_seconds=300,  # 5 min
-                emit_topic="cthulu.health.trigger",
-            ))
-
-            # Position check every 15 minutes
-            self.scheduler.add(JobConfig(
-                id="cthulu-positions",
-                name="CthulhOps Position Check",
-                job_type=JobType.INTERVAL,
-                interval_seconds=900,  # 15 min
-                emit_topic="cthulu.positions.trigger",
-            ))
-
-            # Daily summary at 17:00 UTC (10 PM PKT)
-            # Use interval with active_hours constraint
-            self.scheduler.add(JobConfig(
-                id="cthulu-daily-summary",
-                name="CthulhOps Daily Summary",
-                job_type=JobType.INTERVAL,
-                interval_seconds=3600,  # check every hour
-                emit_topic="cthulu.daily_summary.trigger",
-                active_hours=(17, 18),  # Only fire between 17:00-18:00 UTC
-                max_fires=1,  # Only once (re-registered on reboot)
-            ))
-
-            # Wire event handlers
-            @self.bus.on("cthulu.health.trigger")
-            async def on_cthulu_health(event):
-                if self.cthulu_ops:
-                    await self.cthulu_ops.run_health_cycle()
-
-            @self.bus.on("cthulu.positions.trigger")
-            async def on_cthulu_positions(event):
-                if self.cthulu_ops:
-                    await self.cthulu_ops.run_position_cycle()
-
-            @self.bus.on("cthulu.daily_summary.trigger")
-            async def on_cthulu_daily(event):
-                if self.cthulu_ops:
-                    await self.cthulu_ops.run_daily_summary()
-
-            # Run initial position check after 30s (let everything stabilize)
-            async def _initial_cthulu_check():
-                await asyncio.sleep(30)
-                try:
-                    await self.cthulu_ops.run_health_cycle()
-                    await self.cthulu_ops.run_position_cycle()
-                    logger.info("  CthulhOps initial check complete")
-                except Exception as e:
-                    logger.error(f"CthulhOps initial check failed: {e}")
-
-            asyncio.ensure_future(_initial_cthulu_check())
-            logger.info("  🐙 CthulhOps ready (health:5m, positions:15m, summary:10PM PKT)")
-
-        except Exception as e:
-            logger.warning(f"  CthulhOps failed to start: {e}")
-            self.cthulu_ops = None
-
     async def _boot_pulse(self) -> None:
         """Initialize scheduler."""
         from .pulse.scheduler import Scheduler, JobConfig, JobType
@@ -1737,21 +1654,6 @@ class Runtime:
                     await adapter.send(chat_id, OutboundMessage(content=f"🛡️ {message}"))
                 except Exception as e:
                     logger.error(f"Alert delivery failed: {e}")
-        
-        # CthulhOps → Discord channel posting
-        @self.bus.on("cthulu.discord.send")
-        async def on_cthulu_discord(event):
-            data = event.data
-            channel_id = data.get("channel_id")
-            content = data.get("content", "")
-            if channel_id and content and "discord" in self.adapters:
-                from .nerve.types import OutboundMessage
-                try:
-                    await self.adapters["discord"].send(
-                        channel_id, OutboundMessage(content=content)
-                    )
-                except Exception as e:
-                    logger.error(f"CthulhOps Discord send failed: {e}")
         
         # ── Presence: tool lifecycle → Discord activity states ──────
         @self.bus.on("cortex.tool.executing")
