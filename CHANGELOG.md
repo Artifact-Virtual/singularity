@@ -98,3 +98,17 @@ The first release of Singularity, the Autonomous Enterprise Runtime.
 ---
 
 *Built by Artifact Virtual. Genesis release after 19 days of continuous development.*
+
+## [0.8.0] — 2026-03-14
+
+### Added
+- **Artifact Social subsystem** — enterprise social intelligence platform documentation. 7 platform connectors (Twitter/X, LinkedIn, Instagram, Facebook, Telegram, Discord, Substack), NEXUS unified CLI, ML intelligence pipeline, CMO pipeline integration.
+- **Google Workspace integration** — native module for enterprise Google services.
+- **README overhaul** — best-in-class documentation with ASCII banner, shield badges, architecture diagrams.
+
+### Fixed
+- **Context truncation** — emergency context truncation in agent loop to prevent budget overflow.
+- **Tool call estimation** — accurate tool_call size estimation with lower 75K budget.
+- **ExfilGuard alerts** — proper @mentions and channel routing in security alert pipeline.
+- **ATLAS topology** — None guard to prevent NoneType crash during concurrent board cycles.
+- **ATLAS manager** — board manager updates for topology stability.
