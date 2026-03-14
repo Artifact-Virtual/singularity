@@ -142,7 +142,15 @@ class OllamaCloudProvider(ChatProvider):
                             choice = data["choices"][0]
                             delta = choice.get("delta", {})
                             content = delta.get("content", "")
+                            reasoning = delta.get("reasoning", "")
                             finish = choice.get("finish_reason")
+                            
+                            # For thinking models (DeepSeek, Kimi-thinking),
+                            # reasoning tokens stream before content tokens.
+                            # If content is empty, use reasoning as the delta
+                            # so the base class chat() accumulates the full
+                            # response regardless of which field carries it.
+                            effective_content = content or reasoning
                             
                             # Handle tool call deltas
                             tool_call_delta = None
@@ -154,13 +162,13 @@ class OllamaCloudProvider(ChatProvider):
                                     "function": tc.get("function", {}),
                                 }
 
-                            yield StreamChunk(
-                                delta=content or "",
-                                # finished determined by finish_reason
-                                finish_reason=finish,
-                                tool_call_delta=tool_call_delta,
-                                usage=data.get("usage"),
-                            )
+                            if effective_content or tool_call_delta or finish:
+                                yield StreamChunk(
+                                    delta=effective_content,
+                                    finish_reason=finish,
+                                    tool_call_delta=tool_call_delta,
+                                    usage=data.get("usage"),
+                                )
                             if finish:
                                 self._last_success = time.perf_counter()
                                 return

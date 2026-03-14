@@ -22,7 +22,7 @@
 | 1 | **Event Bus** | Internal pub/sub messaging |
 | 2 | **MARROW** (Memory) | COMB + sessions + context persistence |
 | 3 | **SINEW** (Tools) | 28 tools — exec, read, write, edit, web_fetch, discord×2, comb×2, memory_search, nexus×5, csuite, poa×2, atlas×5, release×5 |
-| 4 | **VOICE** (LLM) | Provider chain: HuggingFace → Copilot → Ollama, circuit breaker fallback |
+| 4 | **VOICE** (LLM) | Provider chain: Copilot → Ollama Cloud → Local Ollama, circuit breaker fallback |
 | 5 | **CORTEX** (Brain) | Agent loop, planner, tool orchestration, BLINK continuation |
 | 6 | **CSUITE** (Command) | CTO, COO, CFO, CISO — scoped tools, auto-dispatch |
 | 7 | **NEXUS** (Evolution) | Self-optimization — AST analysis, hot-swap, evolution engine |
