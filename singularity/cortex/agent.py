@@ -175,6 +175,33 @@ class AgentLoop:
                         "messages": len(messages),
                     }, source="cortex")
                 
+                # ── Hard cap: emergency truncation if context too large ──
+                # Prevents 400 errors from exceeding model's max prompt tokens.
+                # The outer context assembler budgets correctly, but tool call
+                # accumulation within the agent loop can blow past it.
+                MAX_PROMPT_CHARS = 350_000  # ~109K tokens at 3.2 chars/token (under 128K limit)
+                total_chars = sum(len(m.content or "") + sum(
+                    len(str(tc.get("function", tc).get("arguments", ""))) + 100
+                    for tc in (m.tool_calls or [])
+                ) for m in messages)
+                if total_chars > MAX_PROMPT_CHARS:
+                    # Aggressively truncate old tool results to fit
+                    for i in range(len(messages)):
+                        msg = messages[i]
+                        if msg.role == "tool" and msg.content and len(msg.content) > 200:
+                            messages[i] = ChatMessage(
+                                role=msg.role,
+                                content=f"[Truncated: {len(msg.content)} chars — context limit]",
+                                tool_call_id=msg.tool_call_id,
+                                name=msg.name,
+                            )
+                    # Recount after truncation
+                    total_chars_after = sum(len(m.content or "") for m in messages)
+                    logger.warning(
+                        f"[{self._turn_id}] Emergency context truncation: "
+                        f"{total_chars} → {total_chars_after} chars"
+                    )
+                
                 response = await self.voice.chat(
                     messages,
                     tools=TOOL_DEFINITIONS,

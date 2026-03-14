@@ -24,7 +24,7 @@ from ..voice.provider import ChatMessage
 logger = logging.getLogger("singularity.cortex.context")
 
 # Default token budgets (conservative — leaves room for response)
-DEFAULT_CONTEXT_BUDGET = 110_000  # Max tokens for context (leaves headroom — real tokenizers vary)
+DEFAULT_CONTEXT_BUDGET = 75_000  # Max tokens for context (matches singularity.yaml)
 SYSTEM_PROMPT_BUDGET = 10_000     # Reserved for system prompt
 RESPONSE_BUDGET = 8_192           # Reserved for response
 
