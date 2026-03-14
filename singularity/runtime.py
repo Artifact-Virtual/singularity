@@ -409,7 +409,7 @@ class Runtime:
         if vc.ollama.enabled:
             ollama = OllamaProvider(
                 endpoint=vc.ollama.base_url,
-                model=vc.ollama.models[0] if vc.ollama.models else "qwen35-opus",
+                model=vc.ollama.models[0] if vc.ollama.models else "qwen3.5:0.8b",
             )
             providers.append(ollama)
         
