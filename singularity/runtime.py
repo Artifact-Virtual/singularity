@@ -375,41 +375,41 @@ class Runtime:
     async def _boot_voice(self) -> None:
         """Initialize LLM provider chain.
         
-        Chain order: HuggingFace (primary) → Copilot proxy (fallback) → Ollama (last resort)
+        Chain order: Copilot proxy (primary) → Ollama Cloud (fallback) → Local Ollama (last resort)
         """
         from .voice.chain import ProviderChain
         from .voice.proxy import CopilotProxyProvider
-        from .voice.huggingface import HuggingFaceProvider
+        from .voice.ollama_cloud import OllamaCloudProvider
         from .voice.ollama import OllamaProvider
         
         vc = self.config.voice
         providers = []
         
-        # HuggingFace (primary — router.huggingface.co, OpenAI-compatible)
-        hf_config = getattr(vc, 'huggingface', None)
-        if hf_config and getattr(hf_config, 'enabled', False):
-            hf_api_key = hf_config.api_key or os.environ.get("HF_TOKEN_AVA", "") or os.environ.get("HF_TOKEN_ALI", "") or os.environ.get("HF_TOKEN", "")
-            if hf_api_key:
-                hf = HuggingFaceProvider(
-                    model=hf_config.model or "Qwen/Qwen3.5-27B",
-                    api_key=hf_api_key,
-                    base_url=hf_config.base_url or "https://router.huggingface.co/v1",
-                )
-                providers.append(hf)
-                logger.info(f"  VOICE: HuggingFace provider added (model: {hf.model})")
-        
-        # Copilot proxy (fallback — GitHub Copilot API)
+        # Copilot proxy (primary — GitHub Copilot API, frontier models)
         proxy = CopilotProxyProvider(
             endpoint=vc.proxy.base_url,
             model=vc.primary_model,
         )
         providers.append(proxy)
         
-        # Ollama (last resort — local models)
+        # Ollama Cloud (fallback — hosted open-weight heavyweights)
+        oc_config = getattr(vc, 'ollama_cloud', None)
+        if oc_config and getattr(oc_config, 'enabled', False):
+            oc_api_key = getattr(oc_config, 'api_key', '') or os.environ.get("OLLAMA_CLOUD_API_KEY", "")
+            if oc_api_key:
+                oc = OllamaCloudProvider(
+                    api_key=oc_api_key,
+                    model=getattr(oc_config, 'model', None) or "deepseek-v3.2",
+                    base_url=getattr(oc_config, 'base_url', None) or "https://ollama.com/v1",
+                )
+                providers.append(oc)
+                logger.info(f"  VOICE: Ollama Cloud provider added (model: {oc.model})")
+        
+        # Local Ollama (last resort — on-device models)
         if vc.ollama.enabled:
             ollama = OllamaProvider(
                 endpoint=vc.ollama.base_url,
-                model=vc.ollama.models[0] if vc.ollama.models else "llama3.2",
+                model=vc.ollama.models[0] if vc.ollama.models else "qwen35-opus",
             )
             providers.append(ollama)
         
