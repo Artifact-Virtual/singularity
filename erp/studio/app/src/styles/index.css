@@ -2,14 +2,21 @@
 @tailwind components;
 @tailwind utilities;
 
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
 @layer base {
   * {
     @apply border-border;
   }
 
   body {
-    @apply bg-background text-foreground;
-    font-feature-settings: "rlig" 1, "calt" 1;
+    @apply bg-background text-foreground antialiased;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    font-feature-settings: "rlig" 1, "calt" 1, "ss01" 1;
+  }
+
+  code, pre, .mono, .font-mono {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
   }
 
   /* Focus styles */
@@ -17,21 +24,68 @@
     @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background;
   }
 
-  /* Scrollbar styling */
+  /* Smooth transitions for theme switching */
+  *, *::before, *::after {
+    transition: background-color 0.15s ease, border-color 0.15s ease, color 0.05s ease;
+  }
+
+  /* Scrollbar styling — slim, branded */
   ::-webkit-scrollbar {
-    @apply w-2 h-2;
+    @apply w-1.5 h-1.5;
   }
 
   ::-webkit-scrollbar-track {
-    @apply bg-muted;
+    @apply bg-transparent;
   }
 
   ::-webkit-scrollbar-thumb {
-    @apply bg-muted-foreground/30 rounded-full;
+    @apply bg-muted-foreground/20 rounded-full;
   }
 
   ::-webkit-scrollbar-thumb:hover {
-    @apply bg-muted-foreground/50;
+    @apply bg-muted-foreground/40;
+  }
+
+  /* Selection color — brand purple */
+  ::selection {
+    background: hsl(var(--primary) / 0.25);
+    color: hsl(var(--primary-foreground));
+  }
+}
+
+@layer components {
+  /* Glass morphism card style */
+  .card-glass {
+    @apply bg-card/80 backdrop-blur-xl border border-border/50 rounded-xl shadow-sm;
+  }
+
+  /* Subtle glow for active/focus elements */
+  .glow-primary {
+    box-shadow: 0 0 20px hsl(var(--primary) / 0.15), 0 0 40px hsl(var(--primary) / 0.05);
+  }
+
+  /* Status indicator pulse */
+  .pulse-green {
+    @apply relative;
+  }
+  .pulse-green::before {
+    content: '';
+    @apply absolute inset-0 rounded-full bg-emerald-400/40 animate-ping;
+  }
+
+  /* Gradient text utility */
+  .text-gradient {
+    @apply bg-clip-text text-transparent bg-gradient-to-r from-primary to-primary/60;
+  }
+
+  /* Smooth page transitions */
+  .page-enter {
+    animation: pageIn 0.2s ease-out;
+  }
+
+  @keyframes pageIn {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: translateY(0); }
   }
 }
 

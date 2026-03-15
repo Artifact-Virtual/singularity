@@ -1,206 +1,222 @@
-# Singularity ERP — Enterprise Resource Platform
+# Singularity ERP — Artifact Virtual Enterprise Platform
 
-> The operational interface for Singularity. Not just a dashboard — a fully autonomous native AI platform.
+> The native AI-powered enterprise resource platform for Artifact Virtual.
+> Built for Singularity. Runs autonomously.
 
 ## Overview
 
-Singularity ERP is the web-based control plane for the Singularity Autonomous Enterprise Runtime. It provides real-time enterprise management with an integrated AI chat interface that connects directly to Singularity's agent loop.
+Singularity ERP is the operational backbone of Artifact Virtual — a full-stack enterprise platform with native AI integration via the Singularity runtime. Unlike traditional ERPs that bolt on AI as an afterthought, this was designed from the ground up as an **AI-native autonomous platform**.
 
-**Stack:**
-- **Backend:** Fastify + Prisma + PostgreSQL (TypeScript)
-- **Frontend:** React 18 + Vite + Zustand + Radix UI (TypeScript)
-- **AI Integration:** Direct proxy to Singularity HTTP API (:8450)
-- **Auth:** JWT with bcrypt, role-based access control
+The Singularity Chat panel connects directly to the Singularity runtime API, giving operators real-time access to the full autonomous enterprise system from within the ERP dashboard.
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────┐
-│  Studio (React + Vite)          :3100/dashboard     │
-│  ├── Dashboard        — KPIs, revenue, pipeline     │
-│  ├── Singularity AI   — Chat with Singularity ⚡    │
-│  ├── CRM              — Contacts, Deals, Campaigns  │
-│  ├── HRM              — Employees, Departments      │
-│  ├── Finance          — Invoices, Revenue, Expenses  │
-│  ├── Development      — Projects, Repos, Sprints    │
-│  ├── Analytics        — Reports, Metrics            │
-│  ├── Security         — Audit Logs, Access Control  │
-│  ├── Infrastructure   — Services, Health Monitoring │
-│  ├── Integrations     — Third-party Connections     │
-│  ├── Workflows        — Automation Pipelines        │
-│  ├── Stakeholders     — Investor & Board Management │
-│  └── Admin            — Users, Roles, Settings      │
-├─────────────────────────────────────────────────────┤
-│  Backend (Fastify)              :3100/api           │
-│  ├── /api/auth/*      — Register, Login, JWT        │
-│  ├── /api/ai/*        — Singularity Chat Proxy      │
-│  ├── /api/contacts/*  — CRM Contacts CRUD           │
-│  ├── /api/deals/*     — CRM Deals Pipeline          │
-│  ├── /api/employees/* — HRM Employee Management     │
-│  ├── /api/invoices/*  — Finance Invoicing            │
-│  ├── /api/projects/*  — Project Management          │
-│  ├── /api/activities/*— Activity Feed               │
-│  └── /api/health      — Health Check                │
-├─────────────────────────────────────────────────────┤
-│  Singularity Runtime            :8450               │
-│  └── /api/v1/chat     — Agent Loop (28 tools)       │
-├─────────────────────────────────────────────────────┤
-│  PostgreSQL                     :5432               │
-│  └── artifact_erp DB  — 8 tables (Prisma ORM)      │
-└─────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────┐
+│  erp.artifactvirtual.com                        │
+│  ┌───────────────────────────────────────────┐  │
+│  │  Studio (React 18 + Vite + Radix UI)      │  │
+│  │  Port 8750 (nginx)                        │  │
+│  │  14 Modules · Dark Theme · Responsive     │  │
+│  └──────────────────┬────────────────────────┘  │
+│                     │ /api/*                     │
+│  ┌──────────────────▼────────────────────────┐  │
+│  │  Backend (Fastify + Prisma + PostgreSQL)   │  │
+│  │  Port 3100 · JWT Auth · Rate Limited       │  │
+│  │  21 Route Modules · Swagger Docs           │  │
+│  └──────────────────┬────────────────────────┘  │
+│                     │ /api/ai/*                   │
+│  ┌──────────────────▼────────────────────────┐  │
+│  │  Singularity Runtime                       │  │
+│  │  Port 8450 · API Key Auth                  │  │
+│  │  Full Agent Loop · 28 Tools · C-Suite      │  │
+│  └───────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────┘
 ```
 
-## Quick Start
+## Stack
 
-### Prerequisites
-- Node.js 18+
-- PostgreSQL 14+
-- Singularity runtime running on :8450
+| Layer | Technology |
+|-------|------------|
+| Frontend | React 18, Vite 7, TypeScript, Tailwind CSS, Radix UI, Zustand, TanStack Query |
+| Backend | Fastify 5, Prisma ORM, PostgreSQL 14, JWT (bcrypt + refresh tokens) |
+| AI Runtime | Singularity (Python 3.11+, asyncio, Claude claude-opus-4.6) |
+| Hosting | nginx reverse proxy, systemd, Cloudflare tunnel |
 
-### Setup
+## Modules (14)
 
-```bash
-# Backend
-cd erp/backend
-cp .env.example .env  # Edit with your secrets
-npm install
-npx prisma db push
-npx tsx prisma/seed.ts
-npm run dev
+| Module | Route | Description |
+|--------|-------|-------------|
+| **Dashboard** | `/dashboard` | KPI cards, activity feed, quick actions, system health |
+| **Singularity AI** | `/ai` | Chat panel — direct connection to Singularity runtime |
+| **CRM** | `/crm/*` | Contacts, Deals (5-stage Kanban), Campaigns, Support tickets |
+| **HRM** | `/hrm/*` | Employees, Departments, Attendance, Leave, Payroll |
+| **Finance** | `/finance/*` | Invoices, Expenses, Revenue tracking, Budget management |
+| **Development** | `/dev/*` | Projects, Sprints, Issues, Code review, CI/CD pipelines |
+| **Analytics** | `/analytics/*` | Business intelligence, Custom reports, Data visualization |
+| **Stakeholders** | `/stakeholders/*` | Investors, Partners, Board members, Communications |
+| **Infrastructure** | `/infrastructure/*` | Servers, Services, Deployments, Monitoring |
+| **Security** | `/security/*` | Access control, Audit logs, Compliance, Threat monitoring |
+| **Integrations** | `/integrations/*` | Third-party connectors, Webhooks, API management |
+| **Workflows** | `/workflows/*` | Automation rules, Task pipelines, Approval chains |
+| **Admin** | `/admin/*` | User management, Roles, System settings, Audit trail |
+| **Settings** | — | Theme, Preferences, Profile (via AppLayout) |
 
-# Studio
-cd erp/studio/app
-npm install
-npm run dev
-```
+## API Endpoints
 
-### Environment Variables
+### Authentication
+- `POST /api/auth/register` — Create account
+- `POST /api/auth/login` — Login (returns JWT + refresh token)
+- `POST /api/auth/refresh` — Refresh access token
+- `POST /api/auth/forgot-password` — Request password reset
+- `POST /api/auth/reset-password` — Reset with token
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `DATABASE_URL` | ✅ | PostgreSQL connection string |
-| `JWT_SECRET` | ✅ | JWT signing secret (crashes if missing) |
-| `JWT_REFRESH_SECRET` | ✅ | Refresh token secret |
-| `SINGULARITY_API_KEY` | ✅ | Singularity HTTP API key |
-| `SINGULARITY_API_URL` | ❌ | Singularity URL (default: http://localhost:8450) |
-| `SEED_ADMIN_PASSWORD` | ❌ | Admin user password for seeding |
+### Core Resources
+- `GET/POST /api/contacts` — Contact management
+- `GET/POST /api/deals` — Deal pipeline
+- `GET/POST /api/projects` — Project tracking
+- `GET/POST /api/invoices` — Invoice management
+- `GET/POST /api/employees` — Employee records
+- `GET/POST /api/activities` — Activity feed
+- `GET/POST /api/campaigns` — Marketing campaigns
+- `GET/POST /api/support` — Support tickets
+- `GET/POST /api/departments` — Department structure
+- `GET/POST /api/stakeholders` — Stakeholder relations
+- `GET/POST /api/workflows` — Workflow automation
 
-## Modules
+### AI Integration
+- `POST /api/ai/chat` — Send message to Singularity (proxied to :8450)
+- `GET /api/ai/health` — Check Singularity connection status
+- `GET /api/ai/sessions` — List chat sessions
 
-### Singularity AI Chat
-Direct interface to Singularity's agent loop. Supports:
-- Multi-session conversation management
-- Real-time streaming responses
-- Full access to Singularity's 28 tools through natural language
-- Session history persistence (localStorage)
-
-### CRM
-- **Contacts:** Full CRUD with search, filter, status pipeline (Lead → Prospect → Customer → Churned)
-- **Deals:** 5-stage Kanban (Qualified → Proposal → Negotiation → Closed Won/Lost) with probability tracking
-- **Campaigns:** Email, social, ads, event campaign management with ROI tracking
-- **Support:** Ticket management with priority and status tracking
-
-### HRM
-- Employee directory with department assignment
-- Leave management and approval workflows
-- Performance tracking
-- Organizational structure visualization
-
-### Finance
-- Invoice generation and management
-- Revenue tracking and forecasting
-- Expense categorization
-- Financial dashboard with KPIs
-
-### Development
-- Project management with sprint boards
-- Repository integration
-- Issue tracking
-- Deployment pipeline monitoring
-
-### Analytics
-- Cross-module reporting
-- Revenue trends
-- Employee metrics
-- Deal pipeline analytics
-
-### Security
-- Audit log viewer
-- Role-based access control management
-- Session monitoring
-- Security event timeline
-
-### Infrastructure
-- Service health monitoring
-- System resource tracking
-- Deployment status
-- Network topology
-
-### Integrations
-- Third-party service connections
-- API key management
-- Webhook configuration
-
-### Workflows
-- Automation pipeline builder
-- Trigger-based actions
-- Approval flows
-
-### Stakeholders
-- Investor relations management
-- Board reporting
-- Equity tracking
-- Communication logs
-
-### Admin
-- User management (CRUD)
-- Role and permission configuration
-- System settings
-- Feature flags
+### System
+- `GET /api/health` — Backend health check
+- `GET /api/docs` — Swagger/OpenAPI documentation (interactive)
+- `GET/POST /api/admin/users` — User administration
+- `GET/POST /api/admin/roles` — Role management
 
 ## Database Schema
 
-8 models managed by Prisma ORM:
+8 core models with full relations:
 
-- **User** — Authentication, profile, role assignment
-- **Role** — Permission groups (admin, user, custom)
-- **Contact** — CRM contacts with company, status, notes
-- **Deal** — Sales pipeline with stage, value, probability
-- **Employee** — HR records with department, position, salary
-- **Project** — Project management with status, dates, budget
-- **Invoice** — Financial documents with line items, status
-- **Activity** — Cross-module activity feed
+```
+User ──┬── Role (RBAC)
+       ├── Contact ── Deal (5-stage pipeline)
+       ├── Employee ── Department
+       ├── Project
+       ├── Invoice
+       └── Activity (audit trail)
+```
+
+All models use UUIDs, timestamps (createdAt/updatedAt), and proper indexes.
 
 ## Security
 
-- JWT authentication with separate access/refresh secrets
-- bcrypt password hashing (10 salt rounds)
-- Rate limiting (500 req/min, localhost exempt)
-- CORS configuration
-- Role-based route protection
-- Input validation on all endpoints
-- No default secret fallbacks (crashes on missing)
+- **Authentication:** JWT with bcrypt (10 salt rounds), refresh token rotation
+- **Authorization:** Role-based access control (admin, manager, user)
+- **Rate Limiting:** Global 100 req/min, Login 5 req/min
+- **CORS:** Configurable origin whitelist
+- **Secrets:** Environment-only (no hardcoded defaults — crashes on missing JWT_SECRET)
+- **API Docs:** Password-protected Swagger UI
+- **CodeQL:** GitHub Action scanning on every push (security-extended + security-and-quality)
+
+## Configuration
+
+### Environment Variables (backend/.env)
+
+```env
+# Database
+DATABASE_URL=postgresql://user:pass@127.0.0.1:5432/artifact_erp
+
+# Authentication
+JWT_SECRET=<random-64-char>          # REQUIRED — no default
+JWT_REFRESH_SECRET=<random-64-char>  # REQUIRED — no default
+
+# Singularity Integration
+SINGULARITY_API_KEY=<api-key>        # From singularity/.env
+SINGULARITY_API_URL=http://localhost:8450
+
+# Server
+PORT=3100
+NODE_ENV=production
+```
 
 ## Deployment
 
-### systemd Service
-```ini
-[Service]
-WorkingDirectory=/home/adam/workspace/singularity/erp/backend
-ExecStart=/usr/bin/npx tsx src/index.ts
-EnvironmentFile=/home/adam/workspace/singularity/erp/backend/.env
+### Services
+- `artifact-erp.service` — Fastify backend (systemd --user)
+- nginx at port 8750 — serves frontend + proxies API
+- Cloudflare tunnel — `erp.artifactvirtual.com`
+
+### Build & Deploy
+```bash
+# Frontend
+cd studio/app && npm run build
+cp -r dist/* /path/to/deploy/
+
+# Backend
+cd backend && npx tsx src/index.ts
+
+# Or via systemd
+systemctl --user restart artifact-erp
 ```
 
-### nginx Reverse Proxy
-Cloudflare Tunnel → nginx → localhost:3100
+## Singularity Chat Integration
 
-### Public URL
-https://erp.artifactvirtual.com
+The AI module provides a direct chat interface to the Singularity runtime:
 
-## API Documentation
+1. **Frontend** (`modules/ai/components/ChatPanel.tsx`) — Full chat UI with session management, message history, connection status indicator
+2. **Service** (`modules/ai/services/chat.ts`) — API client with localStorage session persistence
+3. **Backend Proxy** (`modules/ai/chat.routes.ts`) — Authenticated proxy to Singularity HTTP API
+4. **Runtime** — Singularity processes messages through its full agent loop (28 tools, C-Suite delegation, memory)
 
-Swagger UI available at `/api/docs` when the backend is running.
+Messages flow: `ChatPanel → /api/ai/chat → localhost:8450/api/v1/chat → Singularity Agent Loop → Response`
 
----
+## URLs
 
-*Part of the Singularity Autonomous Enterprise Runtime. Built by Artifact Virtual.*
+| URL | Description |
+|-----|-------------|
+| https://erp.artifactvirtual.com | Production ERP |
+| https://erp.artifactvirtual.com/api/docs | Swagger API Documentation |
+| https://erp.artifactvirtual.com/api/health | Health Check |
+| https://erp.artifactvirtual.com/api/ai/health | Singularity Connection Status |
+
+## File Structure
+
+```
+singularity/erp/
+├── backend/
+│   ├── src/
+│   │   ├── index.ts              # Fastify app setup
+│   │   ├── config/env.ts         # Environment config
+│   │   ├── middleware/auth.ts     # JWT verification
+│   │   └── modules/
+│   │       ├── auth/             # Register, Login, Refresh, Reset
+│   │       ├── ai/               # Singularity chat proxy
+│   │       ├── admin/            # User & Role management
+│   │       ├── contact/          # CRM contacts
+│   │       ├── deal/             # Deal pipeline
+│   │       ├── project/          # Project management
+│   │       ├── invoice/          # Financial invoices
+│   │       ├── employee/         # HRM employees
+│   │       ├── department/       # Organization structure
+│   │       ├── activity/         # Activity/audit feed
+│   │       ├── campaign/         # Marketing campaigns
+│   │       ├── support/          # Support tickets
+│   │       ├── stakeholder/      # Stakeholder management
+│   │       └── workflow/         # Workflow automation
+│   ├── prisma/
+│   │   └── schema.prisma         # Database schema (8 models)
+│   ├── package.json
+│   └── .env
+├── studio/app/
+│   ├── src/
+│   │   ├── core/                 # Router, providers, API client
+│   │   ├── modules/              # 14 feature modules
+│   │   ├── shared/               # Layouts, components, utils
+│   │   └── styles/               # Tailwind + custom CSS
+│   ├── tailwind.config.ts
+│   ├── vite.config.ts
+│   └── package.json
+└── docker-compose.yml            # PostgreSQL + Redis
+```

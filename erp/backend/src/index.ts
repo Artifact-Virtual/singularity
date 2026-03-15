@@ -50,15 +50,16 @@ fastify.register(jwt, {
   },
 });
 
-// Rate limiting — high limits for Singularity internal traffic, stricter for external
+// Register rate limiting
 fastify.register(rateLimit, {
-  max: 500,
+  max: 100, // max requests per timeWindow
   timeWindow: '1 minute',
-  allowList: ['127.0.0.1', '::1', '192.168.1.13'],
-  errorResponseBuilder: () => ({
-    error: 'Too many requests',
-    message: 'Rate limit exceeded. Please try again later.',
-  }),
+  errorResponseBuilder: () => {
+    return {
+      error: 'Too many requests',
+      message: 'Rate limit exceeded. Please try again later.',
+    };
+  },
 });
 
 // Register Swagger
@@ -88,7 +89,7 @@ fastify.register(swagger, {
 });
 
 fastify.register(swaggerUI, {
-  routePrefix: '/docs',
+  routePrefix: '/api/docs',
   uiConfig: {
     docExpansion: 'list',
     deepLinking: false,
@@ -137,7 +138,7 @@ const start = async () => {
 
     await fastify.listen({ port: config.port, host: '0.0.0.0' });
     fastify.log.info(`Server listening on port ${config.port}`);
-    fastify.log.info(`Swagger documentation available at http://localhost:${config.port}/docs`);
+    fastify.log.info(`Swagger documentation available at http://localhost:${config.port}/api/docs`);
   } catch (err) {
     fastify.log.error(err);
     process.exit(1);

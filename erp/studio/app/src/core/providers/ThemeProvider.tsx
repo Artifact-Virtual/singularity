@@ -30,7 +30,7 @@ const ThemeProviderContext = createContext<ThemeProviderState>(initialState);
 
 export function ThemeProvider({
   children,
-  defaultTheme = 'system',
+  defaultTheme = 'dark',
   storageKey = 'singularity-theme',
   ...props
 }: ThemeProviderProps) {
