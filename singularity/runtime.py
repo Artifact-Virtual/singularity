@@ -1881,10 +1881,15 @@ class Runtime:
         event_dir = Path(self.workspace) / ".singularity" / "events" / "exfilguard"
         event_dir.mkdir(parents=True, exist_ok=True)
         
-        # Rate limit CISO dispatches: one investigation per IP per 5 minutes
-        # Prevents cascade when CISO fails (LLM down, scanner error → retry → flood)
+        # Rate limit CISO dispatches: prevent cascade flooding
         _ciso_dispatch_times: dict[str, float] = {}  # IP → last dispatch timestamp
+        _ciso_process_times: dict[str, float] = {}  # process_name → last dispatch timestamp
+        _ciso_dispatch_count_hour: list[float] = []  # timestamps of all dispatches this hour
         _CISO_COOLDOWN = 300  # 5 minutes between CISO dispatches for same IP
+        _CISO_PROCESS_COOLDOWN = 1800  # 30 minutes between dispatches for same process
+        _CISO_MAX_PER_HOUR = 4  # max 4 CISO dispatches per hour globally
+        # Processes that should never trigger CISO dispatch (handled by ExfilGuard whitelist)
+        _CISO_SKIP_PROCESSES = {"ipfs", "tor", "i2p"}
         
         logger.info("ExfilGuard event relay started")
         
@@ -1936,16 +1941,42 @@ class Runtime:
                                 
                                 # Auto-dispatch CISO for threat investigation
                                 if self.dispatcher:
-                                    # Rate limit: skip if we already dispatched CISO for this IP recently
                                     import time as _time
                                     _alert_ip = payload.get('ip', 'unknown')
+                                    _alert_process = payload.get('process', '').lower().strip()
                                     _now = _time.time()
+                                    
+                                    # Gate 1: Skip whitelisted processes entirely
+                                    if _alert_process and _alert_process in _CISO_SKIP_PROCESSES:
+                                        logger.info(f"ExfilGuard: Skipping CISO dispatch — process '{_alert_process}' is in skip list")
+                                        event_file.unlink()
+                                        continue
+                                    
+                                    # Gate 2: Global hourly cap
+                                    _ciso_dispatch_count_hour[:] = [t for t in _ciso_dispatch_count_hour if _now - t < 3600]
+                                    if len(_ciso_dispatch_count_hour) >= _CISO_MAX_PER_HOUR:
+                                        logger.warning(f"ExfilGuard: CISO dispatch BLOCKED — hourly cap reached ({_CISO_MAX_PER_HOUR}/hr). Alert for {_alert_ip} dropped.")
+                                        event_file.unlink()
+                                        continue
+                                    
+                                    # Gate 3: Per-IP cooldown
                                     _last_dispatch = _ciso_dispatch_times.get(_alert_ip, 0)
                                     if _now - _last_dispatch < _CISO_COOLDOWN:
                                         logger.info(f"ExfilGuard: CISO dispatch rate-limited for {_alert_ip} (cooldown {_CISO_COOLDOWN}s)")
                                         event_file.unlink()
                                         continue
+                                    
+                                    # Gate 4: Per-process cooldown (prevents cascade from multi-peer processes like IPFS)
+                                    if _alert_process:
+                                        _last_process_dispatch = _ciso_process_times.get(_alert_process, 0)
+                                        if _now - _last_process_dispatch < _CISO_PROCESS_COOLDOWN:
+                                            logger.info(f"ExfilGuard: CISO dispatch rate-limited for process '{_alert_process}' (cooldown {_CISO_PROCESS_COOLDOWN}s)")
+                                            event_file.unlink()
+                                            continue
+                                        _ciso_process_times[_alert_process] = _now
+                                    
                                     _ciso_dispatch_times[_alert_ip] = _now
+                                    _ciso_dispatch_count_hour.append(_now)
                                     
                                     # Run CISO Scanner Suite (targeted scan) FIRST
                                     scanner_evidence = ""
