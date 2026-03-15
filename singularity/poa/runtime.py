@@ -159,6 +159,21 @@ class POARuntime:
             result = POARuntime._check_journal(config.log_journal_unit)
             report.checks.append(result)
 
+        # 7. Content verification (if configured)
+        for cc in getattr(config, "content_checks", []):
+            if isinstance(cc, dict) and cc.get("url"):
+                result = POARuntime._check_content(
+                    cc["url"],
+                    contains=cc.get("contains"),
+                    not_contains=cc.get("not_contains"),
+                )
+                report.checks.append(result)
+
+        # 8. Broken link detection (if configured)
+        for link_url in getattr(config, "link_check_urls", []):
+            result = POARuntime._check_links(link_url)
+            report.checks.append(result)
+
         report.duration_ms = (time.monotonic() - start) * 1000
         report.compute_status()
         return report
@@ -392,4 +407,113 @@ class POARuntime:
             return CheckResult(
                 name=f"journal:{unit}", passed=True,
                 severity="info", message=str(e)[:200],
+            )
+
+    @staticmethod
+    def _check_content(url: str, contains: list[str] | None = None,
+                       not_contains: list[str] | None = None) -> CheckResult:
+        """Verify page content — check that expected text is present and unwanted text is absent."""
+        try:
+            req = Request(url, headers={"User-Agent": "Singularity-POA/1.0"})
+            with urlopen(req, timeout=15) as resp:
+                body = resp.read().decode("utf-8", errors="replace")
+
+            issues = []
+            if contains:
+                for text in contains:
+                    if text not in body:
+                        issues.append(f"missing: '{text}'")
+            if not_contains:
+                for text in not_contains:
+                    if text in body:
+                        issues.append(f"found unwanted: '{text}'")
+
+            if issues:
+                return CheckResult(
+                    name=f"content:{url}",
+                    passed=False,
+                    severity="warn",
+                    message="; ".join(issues[:5]),
+                )
+            return CheckResult(
+                name=f"content:{url}",
+                passed=True,
+                severity="info",
+                message=f"content OK ({len(body)} bytes)",
+                value=len(body),
+            )
+        except Exception as e:
+            return CheckResult(
+                name=f"content:{url}",
+                passed=False,
+                severity="warn",
+                message=f"content check failed: {str(e)[:150]}",
+            )
+
+    @staticmethod
+    def _check_links(url: str) -> CheckResult:
+        """Crawl a page and check for broken internal links."""
+        import re
+        try:
+            req = Request(url, headers={"User-Agent": "Singularity-POA/1.0"})
+            with urlopen(req, timeout=15) as resp:
+                body = resp.read().decode("utf-8", errors="replace")
+                base_url = f"{resp.url.split('/')[0]}//{resp.url.split('/')[2]}"
+
+            # Extract href values from the page
+            hrefs = re.findall(r'href=["\']([^"\']+)["\']', body)
+
+            broken = []
+            checked = 0
+            for href in hrefs:
+                # Skip anchors, javascript, mailto, external
+                if href.startswith(("#", "javascript:", "mailto:", "tel:")):
+                    continue
+                # Build full URL for relative links
+                if href.startswith("/"):
+                    full_url = base_url + href
+                elif href.startswith("http"):
+                    # Only check same-domain links
+                    if base_url not in href:
+                        continue
+                    full_url = href
+                else:
+                    continue
+
+                checked += 1
+                if checked > 50:  # cap at 50 links per page
+                    break
+
+                try:
+                    link_req = Request(full_url, method="HEAD",
+                                       headers={"User-Agent": "Singularity-POA/1.0"})
+                    with urlopen(link_req, timeout=8) as link_resp:
+                        if link_resp.status >= 400:
+                            broken.append(f"{href} → {link_resp.status}")
+                except HTTPError as he:
+                    broken.append(f"{href} → {he.code}")
+                except Exception:
+                    broken.append(f"{href} → timeout/error")
+
+            if broken:
+                return CheckResult(
+                    name=f"links:{url}",
+                    passed=False,
+                    severity="warn",
+                    message=f"{len(broken)}/{checked} broken: {'; '.join(broken[:5])}",
+                    value=len(broken),
+                )
+            return CheckResult(
+                name=f"links:{url}",
+                passed=True,
+                severity="info",
+                message=f"{checked} links OK",
+                value=checked,
+            )
+        except Exception as e:
+            return CheckResult(
+                name=f"links:{url}",
+                passed=False,
+                severity="warn",
+                message=f"link check failed: {str(e)[:150]}",
             )

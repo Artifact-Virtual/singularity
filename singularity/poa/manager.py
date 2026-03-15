@@ -105,6 +105,10 @@ class POAConfig:
     escalation_channel: str = ""   # Discord channel ID
     auto_restart: bool = False     # restart service on failure
     
+    # Content monitoring
+    content_checks: list[dict] = field(default_factory=list)  # [{url, contains, not_contains}]
+    link_check_urls: list[str] = field(default_factory=list)   # URLs to crawl for broken links
+    
     # Customer ops
     support_email: str = ""
     docs_url: str = ""
